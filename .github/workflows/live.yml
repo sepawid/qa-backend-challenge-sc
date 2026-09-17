@@ -1,0 +1,47 @@
+name: Live GitHub Integration Check
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Run once a day at 06:00 UTC
+    - cron: "0 6 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-github-verification
+  cancel-in-progress: true
+
+jobs:
+  live-check:
+    name: Live GitHub API Verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Execute Live Vitest Suite
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TIMEOUT_MS: "15000"
+          GITHUB_MAX_PAGES: "30"
+        run: npm run test:live
+
+      - name: Execute Live Showcase Runner
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TIMEOUT_MS: "15000"
+          GITHUB_MAX_PAGES: "30"
+        run: npm run demo:live

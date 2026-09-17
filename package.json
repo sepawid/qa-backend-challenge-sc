@@ -1,0 +1,35 @@
+{
+  "name": "qa-backend-challenge-sc",
+  "version": "1.0.0",
+  "description": "Presentation-grade QA backend challenge showcase with deterministic evidence and live GitHub API integration",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "npm run demo",
+    "demo": "npm run demo:fixture",
+    "demo:fixture": "tsx src/presentation/cli.ts --mode=fixture",
+    "demo:live": "tsx src/presentation/cli.ts --mode=live",
+    "demo:json": "tsx src/presentation/cli.ts --mode=fixture --format=json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:live": "vitest run --config vitest.live.config.ts",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json",
+    "check": "npm run typecheck && npm test && npm run build"
+  },
+  "dependencies": {
+    "picocolors": "^1.1.1",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "@vitest/coverage-v8": "^3.0.8",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2",
+    "vitest": "^3.0.8"
+  }
+}

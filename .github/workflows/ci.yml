@@ -1,0 +1,44 @@
+name: CI - Deterministic Verification
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Typecheck, Test, Build & Fixture Showcase
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: "npm"
+
+      - name: Install dependencies reproducibly
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Deterministic Unit & Integration Tests
+        run: npm test
+
+      - name: Test Coverage
+        run: npm run test:coverage
+
+      - name: Build TypeScript to JavaScript
+        run: npm run build
+
+      - name: Verify Fixture Presentation Runner (JSON Output)
+        run: npm run demo:fixture -- --format=json
