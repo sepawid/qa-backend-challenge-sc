@@ -16,14 +16,20 @@ export interface CollectionMetrics {
   readonly paginationComplete: boolean;
 }
 
+export interface SimulationResult {
+  readonly expectedViolation: string;
+  readonly detected: boolean;
+}
+
 export interface ValidationSummary {
   readonly schemaValid: boolean;
   readonly aggregateValid: boolean;
   readonly violations: readonly AggregateViolation[];
+  readonly simulation?: SimulationResult | undefined;
 }
 
 export interface RunResult {
-  readonly contractVersion: "1.0";
+  readonly contractVersion: "1.1";
   readonly mode: "fixture" | "live";
   readonly status: "passed" | "failed" | "incomplete";
   readonly source: PresentationSource;
@@ -54,11 +60,12 @@ export function buildRunResult(params: {
   schemaValid: boolean;
   aggregateValid: boolean;
   violations?: readonly AggregateViolation[] | undefined;
+  simulation?: SimulationResult | undefined;
   durationMs: number;
   limitations?: readonly string[] | undefined;
 }): RunResult {
   return {
-    contractVersion: "1.0",
+    contractVersion: "1.1",
     mode: params.mode,
     status: params.status,
     source: {
@@ -79,6 +86,7 @@ export function buildRunResult(params: {
       schemaValid: params.schemaValid,
       aggregateValid: params.aggregateValid,
       violations: params.violations ?? [],
+      ...(params.simulation !== undefined ? { simulation: params.simulation } : {}),
     },
     durationMs: params.durationMs,
     limitations: params.limitations ?? KNOWN_LIMITATIONS,

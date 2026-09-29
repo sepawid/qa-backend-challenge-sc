@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildRunResult, KNOWN_LIMITATIONS } from "../../src/presentation/presentation-model.js";
 
 describe("Presentation: presentation-model", () => {
-  it("constructs a valid RunResult adhering to contractVersion 1.0", () => {
+  it("constructs a valid RunResult adhering to contractVersion 1.1", () => {
     const result = buildRunResult({
       mode: "fixture",
       status: "passed",
@@ -16,10 +16,14 @@ describe("Presentation: presentation-model", () => {
       paginationComplete: true,
       schemaValid: true,
       aggregateValid: true,
+      simulation: {
+        expectedViolation: "HIGH_PRIORITY_PR_IS_DRAFT",
+        detected: true,
+      },
       durationMs: 100,
     });
 
-    expect(result.contractVersion).toBe("1.0");
+    expect(result.contractVersion).toBe("1.1");
     expect(result.mode).toBe("fixture");
     expect(result.status).toBe("passed");
     expect(result.source.provider).toBe("github");

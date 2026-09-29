@@ -178,30 +178,58 @@ export async function runShowcase(
   const canonicalValidated = aggregateResponseSchema.parse(canonicalAggregate);
   const canonicalRules = validateAggregateRules(canonicalValidated);
 
+  const hasCountMismatch = canonicalRules.violations.some((v) => v.code === "PR_COUNT_MISMATCH");
+  const hasHighPriorityDraft = canonicalRules.violations.some((v) => v.code === "HIGH_PRIORITY_PR_IS_DRAFT");
+  const rule1Badge = hasCountMismatch ? formatter.badge("FAIL", "fail") : formatter.badge("PASS", "pass");
+  const rule2Badge = hasHighPriorityDraft ? formatter.badge("FAIL", "fail") : formatter.badge("PASS", "pass");
+
   if (!isJson) {
     log(`  Scenario A: Canonical challenge payload (product_id="${canonicalValidated.product_id}")`);
-    log(`    • Rule 1 (Integrity: total_open_prs == prs.length): ${formatter.badge("PASS", "pass")}`);
-    log(`    • Rule 2 (high-priority PRs must not be draft):     ${formatter.badge("PASS", "pass")}`);
+    log(`    • Rule 1 (Integrity: total_open_prs == prs.length): ${rule1Badge}`);
+    log(`    • Rule 2 (high-priority PRs must not be draft):     ${rule2Badge}`);
+    if (canonicalRules.violations.length > 0) {
+      for (const v of canonicalRules.violations) {
+        log(`      ${formatter.red(`[Violation] ${v.message}`)}`);
+      }
+    }
   }
 
   // Scenario 2B: Controlled violation simulation for CI observability
   const violationValidated = aggregateResponseSchema.parse(simulationAggregate);
   const violationRules = validateAggregateRules(violationValidated);
 
+  const expectedCode = "HIGH_PRIORITY_PR_IS_DRAFT";
+  const simulationDetected = violationRules.violations.some((v) => v.code === expectedCode);
+
+  const targetPr = violationValidated.pull_requests.find(
+    (pr) => pr.labels.includes("high-priority") && pr.meta.is_draft,
+  );
+  const prDesc = targetPr
+    ? `PR #${targetPr.id} having label "high-priority" AND meta.is_draft=true`
+    : `simulated violation payload`;
+
   if (!isJson) {
     log(`\n  Scenario B: Controlled Defensive Demonstration (Simulated Violation)`);
-    log(`    • Payload with PR #1024 having label "high-priority" AND meta.is_draft=true`);
-    const violationMessage = violationRules.violations.map((v) => `      [Expected Failure Caught] ${v.message}`).join("\n");
-    log(formatter.yellow(violationMessage));
-    log(`    • Observability Status: ${formatter.badge("RULE ENFORCED", "sim")} (Clear actionable diagnostic message)`);
+    log(`    • Payload with ${prDesc}`);
+    if (simulationDetected) {
+      const violationMessage = violationRules.violations.map((v) => `      [Expected Failure Caught] ${v.message}`).join("\n");
+      log(formatter.yellow(violationMessage));
+      log(`    • Observability Status: ${formatter.badge("RULE ENFORCED", "sim")} (Clear actionable diagnostic message)`);
+    } else {
+      log(`    • Observability Status: ${formatter.badge("VIOLATION NOT DETECTED", "fail")} (Expected ${expectedCode} was not caught)`);
+    }
   }
+
+  const isPassed = part1Result.isComplete && canonicalRules.isValid && simulationDetected;
+  const finalStatus = isPassed ? "passed" : "failed";
+  const finalExitCode = isPassed ? 0 : 1;
 
   const durationMs = now() - startTime;
   const observedTo = new Date(now()).toISOString();
 
   const runResult = buildRunResult({
     mode: args.mode,
-    status: "passed",
+    status: finalStatus,
     observedFrom,
     observedTo,
     fixtureName: args.mode === "fixture" ? "multi-page-deterministic-fixture" : undefined,
@@ -213,6 +241,10 @@ export async function runShowcase(
     schemaValid: true,
     aggregateValid: canonicalRules.isValid,
     violations: canonicalRules.violations,
+    simulation: {
+      expectedViolation: expectedCode,
+      detected: simulationDetected,
+    },
     durationMs,
   });
 
@@ -220,14 +252,17 @@ export async function runShowcase(
     stdout(`${JSON.stringify(runResult, null, 2)}\n`);
   } else {
     log(formatter.section("4. CONCLUSION & VERIFICATION EVIDENCE"));
-    log(`  Showcase completed in ${durationMs}ms with status: ${formatter.badge("ALL REQUIREMENTS SATISFIED", "pass")}`);
+    const conclusionBadge = isPassed
+      ? formatter.badge("ALL REQUIREMENTS SATISFIED", "pass")
+      : formatter.badge("REQUIREMENTS FAILED", "fail");
+    log(`  Showcase completed in ${durationMs}ms with status: ${conclusionBadge}`);
     log(`\n  To run independent test suites:`);
     log(`    • Deterministic offline tests: ${formatter.cyan("npm test")}`);
     log(`    • Live GitHub API test:        ${formatter.cyan("npm run test:live")}`);
     log(`    • Automated CI check:          ${formatter.cyan("npm run check")}\n`);
   }
 
-  return { exitCode: 0, result: runResult };
+  return { exitCode: finalExitCode, result: runResult };
 }
 
 // Entrypoint execution when invoked directly
