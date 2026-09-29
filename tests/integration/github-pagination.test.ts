@@ -10,48 +10,17 @@ import {
   page1Fixture,
   page2Fixture,
   page3Fixture,
-} from "../fixtures/github-pulls-pages.js";
+} from "../../src/demo/fixtures/github-pulls-pages.js";
+import { createFixtureFetch } from "../../src/demo/fixture-fetch.js";
 
 describe("Integration: Deterministic multi-page pagination & defensive controls", () => {
   it("fetches all 3 pages sequentially, validates schemas, and calculates exact open non-draft total", async () => {
     const requestedUrls: string[] = [];
+    const fixtureFetch = createFixtureFetch();
 
     const mockFetch = vi.fn().mockImplementation(async (url: string) => {
       requestedUrls.push(url);
-      const parsed = new URL(url);
-      const pageParam = parsed.searchParams.get("page");
-
-      if (pageParam === null || pageParam === "1") {
-        return new Response(JSON.stringify(page1Fixture), {
-          status: 200,
-          headers: {
-            "content-type": "application/json",
-            link: '<https://api.github.com/repos/appwrite/appwrite/pulls?state=open&per_page=100&page=2>; rel="next"',
-          },
-        });
-      }
-
-      if (pageParam === "2") {
-        return new Response(JSON.stringify(page2Fixture), {
-          status: 200,
-          headers: {
-            "content-type": "application/json",
-            link: '<https://api.github.com/repos/appwrite/appwrite/pulls?state=open&per_page=100&page=3>; rel="next"',
-          },
-        });
-      }
-
-      if (pageParam === "3") {
-        return new Response(JSON.stringify(page3Fixture), {
-          status: 200,
-          headers: {
-            "content-type": "application/json",
-            // No next link on last page
-          },
-        });
-      }
-
-      throw new Error(`Unexpected URL called: ${url}`);
+      return fixtureFetch(url);
     });
 
     const client = new GitHubPullRequestClient({

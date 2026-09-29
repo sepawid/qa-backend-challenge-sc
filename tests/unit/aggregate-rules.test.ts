@@ -5,9 +5,9 @@ import {
   AggregateRuleError,
 } from "../../src/business/aggregate-rules.js";
 import { aggregateResponseSchema } from "../../src/schemas/aggregate.schema.js";
-import { sampleAggregateResponse } from "../fixtures/aggregate-response.js";
-import { aggregateCountMismatchFixture } from "../fixtures/aggregate-count-mismatch.js";
-import { aggregateHighPriorityDraftFixture } from "../fixtures/aggregate-high-priority-draft.js";
+import { sampleAggregateResponse } from "../../src/demo/fixtures/aggregate-response.js";
+import { aggregateCountMismatchFixture } from "../../src/demo/fixtures/aggregate-count-mismatch.js";
+import { aggregateHighPriorityDraftFixture } from "../../src/demo/fixtures/aggregate-high-priority-draft.js";
 
 describe("Business Logic: aggregate-rules (Part 2)", () => {
   it("passes for the canonical challenge sample payload", () => {

@@ -11,20 +11,26 @@ import {
   SchemaValidationError,
   PaginationError,
 } from "../core/errors.js";
-import {
-  page1Fixture,
-  page2Fixture,
-  page3Fixture,
-} from "../../tests/fixtures/github-pulls-pages.js";
-import { sampleAggregateResponse } from "../../tests/fixtures/aggregate-response.js";
-import { aggregateHighPriorityDraftFixture } from "../../tests/fixtures/aggregate-high-priority-draft.js";
+import { createFixtureFetch } from "../demo/fixture-fetch.js";
+import { sampleAggregateResponse } from "../demo/fixtures/aggregate-response.js";
+import { aggregateHighPriorityDraftFixture } from "../demo/fixtures/aggregate-high-priority-draft.js";
 import { buildRunResult, type RunResult } from "./presentation-model.js";
 import { TerminalFormatter } from "./formatter.js";
 import { parseEnvironmentConfig } from "../schemas/config.schema.js";
 
-interface CliArguments {
+export interface CliArguments {
   mode: "fixture" | "live";
   format: "human" | "json";
+}
+
+export interface ShowcaseDeps {
+  readonly env?: NodeJS.ProcessEnv | undefined;
+  readonly fetchImpl?: typeof fetch | undefined;
+  readonly canonicalAggregate?: unknown;
+  readonly simulationAggregate?: unknown;
+  readonly stdout?: ((s: string) => void) | undefined;
+  readonly stderr?: ((s: string) => void) | undefined;
+  readonly now?: (() => number) | undefined;
 }
 
 function parseCliArgs(): CliArguments {
@@ -42,44 +48,6 @@ function parseCliArgs(): CliArguments {
   return { mode, format };
 }
 
-function createFixtureFetch(): typeof fetch {
-  return async (input: RequestInfo | URL) => {
-    const rawUrl = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
-    const parsed = new URL(rawUrl);
-    const page = parsed.searchParams.get("page");
-
-    if (page === null || page === "1") {
-      return new Response(JSON.stringify(page1Fixture), {
-        status: 200,
-        headers: {
-          "content-type": "application/json",
-          link: '<https://api.github.com/repos/appwrite/appwrite/pulls?state=open&per_page=100&page=2>; rel="next"',
-          "x-ratelimit-remaining": "59",
-        },
-      });
-    }
-
-    if (page === "2") {
-      return new Response(JSON.stringify(page2Fixture), {
-        status: 200,
-        headers: {
-          "content-type": "application/json",
-          link: '<https://api.github.com/repos/appwrite/appwrite/pulls?state=open&per_page=100&page=3>; rel="next"',
-          "x-ratelimit-remaining": "58",
-        },
-      });
-    }
-
-    return new Response(JSON.stringify(page3Fixture), {
-      status: 200,
-      headers: {
-        "content-type": "application/json",
-        "x-ratelimit-remaining": "57",
-      },
-    });
-  };
-}
-
 function mapErrorToExitCode(error: unknown): number {
   if (error instanceof ConfigurationError) return 2;
   if (error instanceof TransportError) return 3;
@@ -90,14 +58,26 @@ function mapErrorToExitCode(error: unknown): number {
   return 1;
 }
 
-export async function runShowcase(args: CliArguments): Promise<{ exitCode: number; result: RunResult }> {
-  const envConfig = parseEnvironmentConfig();
+export async function runShowcase(
+  args: CliArguments,
+  deps: ShowcaseDeps = {},
+): Promise<{ exitCode: number; result: RunResult }> {
+  const env = deps.env ?? process.env;
+  const stdout = deps.stdout ?? ((s: string) => process.stdout.write(s));
+  const stderr = deps.stderr ?? ((s: string) => process.stderr.write(s));
+  const now = deps.now ?? Date.now;
+  const canonicalAggregate = deps.canonicalAggregate ?? sampleAggregateResponse;
+  const simulationAggregate = deps.simulationAggregate ?? aggregateHighPriorityDraftFixture;
+
+  const envConfig = parseEnvironmentConfig(env);
   const formatter = new TerminalFormatter();
-  const startTime = Date.now();
-  const observedFrom = new Date().toISOString();
+  const startTime = now();
+  const observedFrom = new Date(startTime).toISOString();
 
   const isJson = args.format === "json";
-  const log = isJson ? (...items: unknown[]) => process.stderr.write(`${items.join(" ")}\n`) : console.log;
+  const log = isJson
+    ? (...items: unknown[]) => stderr(`${items.join(" ")}\n`)
+    : (...items: unknown[]) => stdout(`${items.join(" ")}\n`);
 
   if (!isJson) {
     log(formatter.banner(
@@ -121,7 +101,7 @@ export async function runShowcase(args: CliArguments): Promise<{ exitCode: numbe
   }
 
   const client = new GitHubPullRequestClient({
-    fetchImpl: args.mode === "live" ? fetch : createFixtureFetch(),
+    fetchImpl: deps.fetchImpl ?? (args.mode === "live" ? fetch : createFixtureFetch()),
     token: envConfig.GITHUB_TOKEN,
     timeoutMs: envConfig.GITHUB_TIMEOUT_MS,
     maxPages: envConfig.GITHUB_MAX_PAGES,
@@ -140,8 +120,8 @@ export async function runShowcase(args: CliArguments): Promise<{ exitCode: numbe
   try {
     part1Result = await client.fetchAllOpenPullRequests();
   } catch (error) {
-    const durationMs = Date.now() - startTime;
-    const observedTo = new Date().toISOString();
+    const durationMs = now() - startTime;
+    const observedTo = new Date(now()).toISOString();
     const exitCode = mapErrorToExitCode(error);
     const errorMessage = error instanceof Error ? error.message : String(error);
 
@@ -168,7 +148,7 @@ export async function runShowcase(args: CliArguments): Promise<{ exitCode: numbe
     });
 
     if (isJson) {
-      process.stdout.write(`${JSON.stringify(incompleteResult, null, 2)}\n`);
+      stdout(`${JSON.stringify(incompleteResult, null, 2)}\n`);
     }
 
     return { exitCode, result: incompleteResult };
@@ -195,7 +175,7 @@ export async function runShowcase(args: CliArguments): Promise<{ exitCode: numbe
   }
 
   // Scenario 2A: Canonical payload happy path
-  const canonicalValidated = aggregateResponseSchema.parse(sampleAggregateResponse);
+  const canonicalValidated = aggregateResponseSchema.parse(canonicalAggregate);
   const canonicalRules = validateAggregateRules(canonicalValidated);
 
   if (!isJson) {
@@ -205,7 +185,7 @@ export async function runShowcase(args: CliArguments): Promise<{ exitCode: numbe
   }
 
   // Scenario 2B: Controlled violation simulation for CI observability
-  const violationValidated = aggregateResponseSchema.parse(aggregateHighPriorityDraftFixture);
+  const violationValidated = aggregateResponseSchema.parse(simulationAggregate);
   const violationRules = validateAggregateRules(violationValidated);
 
   if (!isJson) {
@@ -216,8 +196,8 @@ export async function runShowcase(args: CliArguments): Promise<{ exitCode: numbe
     log(`    • Observability Status: ${formatter.badge("RULE ENFORCED", "sim")} (Clear actionable diagnostic message)`);
   }
 
-  const durationMs = Date.now() - startTime;
-  const observedTo = new Date().toISOString();
+  const durationMs = now() - startTime;
+  const observedTo = new Date(now()).toISOString();
 
   const runResult = buildRunResult({
     mode: args.mode,
@@ -237,7 +217,7 @@ export async function runShowcase(args: CliArguments): Promise<{ exitCode: numbe
   });
 
   if (isJson) {
-    process.stdout.write(`${JSON.stringify(runResult, null, 2)}\n`);
+    stdout(`${JSON.stringify(runResult, null, 2)}\n`);
   } else {
     log(formatter.section("4. CONCLUSION & VERIFICATION EVIDENCE"));
     log(`  Showcase completed in ${durationMs}ms with status: ${formatter.badge("ALL REQUIREMENTS SATISFIED", "pass")}`);

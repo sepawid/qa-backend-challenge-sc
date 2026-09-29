@@ -1,11 +1,12 @@
-import type { AggregateResponse } from "../../src/schemas/aggregate.schema.js";
+import type { AggregateResponse } from "../../schemas/aggregate.schema.js";
 
 /**
- * The exact sample JSON payload provided in Part 2 of the challenge specification.
+ * Fixture scenario violating Part 2 integrity rule:
+ * total_open_prs is 3, but pull_requests array contains only 1 item.
  */
-export const sampleAggregateResponse: AggregateResponse = {
+export const aggregateCountMismatchFixture: AggregateResponse = {
   product_id: "appwrite-001",
-  total_open_prs: 1,
+  total_open_prs: 3, // MISMATCH with pull_requests.length (1)
   last_updated: "2024-03-20T15:30:00Z",
   pull_requests: [
     {

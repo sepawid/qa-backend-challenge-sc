@@ -1,4 +1,4 @@
-import type { AggregateResponse } from "../../src/schemas/aggregate.schema.js";
+import type { AggregateResponse } from "../../schemas/aggregate.schema.js";
 
 /**
  * Fixture scenario violating Part 2 rule:

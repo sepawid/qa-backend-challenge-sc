@@ -1,4 +1,4 @@
-import type { GitHubPullRequest } from "../../src/schemas/github-pull.schema.js";
+import type { GitHubPullRequest } from "../../schemas/github-pull.schema.js";
 
 /**
  * Multi-page GitHub Pull Requests fixture representing a deterministic 3-page response dataset.

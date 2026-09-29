@@ -8,7 +8,7 @@ import {
   SchemaValidationError,
   TransportError,
 } from "../../src/core/errors.js";
-import { page1Fixture } from "../fixtures/github-pulls-pages.js";
+import { page1Fixture } from "../../src/demo/fixtures/github-pulls-pages.js";
 
 describe("Core: GitHubPullRequestClient", () => {
   it("fetches single page successfully with default headers", async () => {

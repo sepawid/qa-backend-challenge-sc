@@ -1,14 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import { runShowcase } from "../../src/presentation/cli.js";
 
-// Suppress console output during tests
-vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-vi.spyOn(console, "log").mockImplementation(() => {});
-
 describe("Presentation: CLI exit codes and incomplete state", () => {
   it("returns exitCode 0 and status 'passed' for successful fixture execution", async () => {
-    const { exitCode, result } = await runShowcase({ mode: "fixture", format: "json" });
+    const stdoutWrites: string[] = [];
+    const { exitCode, result } = await runShowcase(
+      { mode: "fixture", format: "json" },
+      { stdout: (s) => stdoutWrites.push(s) },
+    );
 
     expect(exitCode).toBe(0);
     expect(result.status).toBe("passed");
@@ -18,111 +17,137 @@ describe("Presentation: CLI exit codes and incomplete state", () => {
   });
 
   it("returns exitCode 3 and status 'incomplete' for TransportError (network failure)", async () => {
-    // Dynamically import to mock the client
-    const { GitHubPullRequestClient } = await import("../../src/core/github-client.js");
-    const { TransportError } = await import("../../src/core/errors.js");
+    const fetchImpl = vi.fn().mockRejectedValue(new Error("Connection refused"));
+    const stdoutWrites: string[] = [];
 
-    const originalFetchAll = GitHubPullRequestClient.prototype.fetchAllOpenPullRequests;
-    GitHubPullRequestClient.prototype.fetchAllOpenPullRequests = async function () {
-      throw new TransportError("Connection refused", { page: 1 });
-    };
+    const { exitCode, result } = await runShowcase(
+      { mode: "fixture", format: "json" },
+      {
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        stdout: (s) => stdoutWrites.push(s),
+      },
+    );
 
-    try {
-      const { exitCode, result } = await runShowcase({ mode: "fixture", format: "json" });
-
-      expect(exitCode).toBe(3);
-      expect(result.status).toBe("incomplete");
-      expect(result.collection.paginationComplete).toBe(false);
-      expect(result.collection.recordsReceived).toBe(0);
-    } finally {
-      GitHubPullRequestClient.prototype.fetchAllOpenPullRequests = originalFetchAll;
-    }
+    expect(exitCode).toBe(3);
+    expect(result.status).toBe("incomplete");
+    expect(result.collection.paginationComplete).toBe(false);
+    expect(result.collection.recordsReceived).toBe(0);
   });
 
   it("returns exitCode 4 and status 'incomplete' for SchemaValidationError", async () => {
-    const { GitHubPullRequestClient } = await import("../../src/core/github-client.js");
-    const { SchemaValidationError } = await import("../../src/core/errors.js");
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify([{ invalid: true }]), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
 
-    const originalFetchAll = GitHubPullRequestClient.prototype.fetchAllOpenPullRequests;
-    GitHubPullRequestClient.prototype.fetchAllOpenPullRequests = async function () {
-      throw new SchemaValidationError("Invalid schema on page 1", { page: 1 });
-    };
+    const { exitCode, result } = await runShowcase(
+      { mode: "fixture", format: "json" },
+      {
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        stdout: () => {},
+      },
+    );
 
-    try {
-      const { exitCode, result } = await runShowcase({ mode: "fixture", format: "json" });
-
-      expect(exitCode).toBe(4);
-      expect(result.status).toBe("incomplete");
-    } finally {
-      GitHubPullRequestClient.prototype.fetchAllOpenPullRequests = originalFetchAll;
-    }
+    expect(exitCode).toBe(4);
+    expect(result.status).toBe("incomplete");
   });
 
   it("returns exitCode 5 and status 'incomplete' for PaginationError", async () => {
-    const { GitHubPullRequestClient } = await import("../../src/core/github-client.js");
-    const { PaginationError } = await import("../../src/core/errors.js");
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify([]), {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          link: [
+            '<https://api.github.com/repos/appwrite/appwrite/pulls?page=2>; rel="next"',
+            '<https://api.github.com/repos/appwrite/appwrite/pulls?page=3>; rel="next"',
+          ].join(", "),
+        },
+      }),
+    );
 
-    const originalFetchAll = GitHubPullRequestClient.prototype.fetchAllOpenPullRequests;
-    GitHubPullRequestClient.prototype.fetchAllOpenPullRequests = async function () {
-      throw new PaginationError("Cycle detected", { page: 3 });
-    };
+    const { exitCode, result } = await runShowcase(
+      { mode: "fixture", format: "json" },
+      {
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        stdout: () => {},
+      },
+    );
 
-    try {
-      const { exitCode, result } = await runShowcase({ mode: "fixture", format: "json" });
-
-      expect(exitCode).toBe(5);
-      expect(result.status).toBe("incomplete");
-    } finally {
-      GitHubPullRequestClient.prototype.fetchAllOpenPullRequests = originalFetchAll;
-    }
+    expect(exitCode).toBe(5);
+    expect(result.status).toBe("incomplete");
   });
 
   it("returns exitCode 3 and status 'incomplete' for HttpError", async () => {
-    const { GitHubPullRequestClient } = await import("../../src/core/github-client.js");
-    const { HttpError } = await import("../../src/core/errors.js");
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response("Rate limit exceeded", {
+        status: 403,
+        headers: { "x-ratelimit-remaining": "0" },
+      }),
+    );
 
-    const originalFetchAll = GitHubPullRequestClient.prototype.fetchAllOpenPullRequests;
-    GitHubPullRequestClient.prototype.fetchAllOpenPullRequests = async function () {
-      throw new HttpError("Rate limit exceeded", 403, { page: 1 });
-    };
+    const { exitCode, result } = await runShowcase(
+      { mode: "fixture", format: "json" },
+      {
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        stdout: () => {},
+      },
+    );
 
-    try {
-      const { exitCode, result } = await runShowcase({ mode: "fixture", format: "json" });
-
-      expect(exitCode).toBe(3);
-      expect(result.status).toBe("incomplete");
-    } finally {
-      GitHubPullRequestClient.prototype.fetchAllOpenPullRequests = originalFetchAll;
-    }
+    expect(exitCode).toBe(3);
+    expect(result.status).toBe("incomplete");
   });
 
   it("emits JSON output to stdout even on error when --format=json", async () => {
-    const { GitHubPullRequestClient } = await import("../../src/core/github-client.js");
-    const { TransportError } = await import("../../src/core/errors.js");
-
-    const originalFetchAll = GitHubPullRequestClient.prototype.fetchAllOpenPullRequests;
-    GitHubPullRequestClient.prototype.fetchAllOpenPullRequests = async function () {
-      throw new TransportError("Timeout", { page: 1 });
-    };
-
+    const fetchImpl = vi.fn().mockRejectedValue(new Error("Timeout"));
     const stdoutWrites: string[] = [];
-    const writeSpy = vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
-      stdoutWrites.push(String(chunk));
-      return true;
-    });
 
-    try {
-      await runShowcase({ mode: "fixture", format: "json" });
+    await runShowcase(
+      { mode: "fixture", format: "json" },
+      {
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        stdout: (s) => stdoutWrites.push(s),
+      },
+    );
 
-      // stdout should contain exactly one JSON document
-      const combined = stdoutWrites.join("");
-      expect(() => JSON.parse(combined)).not.toThrow();
-      const parsed = JSON.parse(combined);
-      expect(parsed.status).toBe("incomplete");
-      expect(parsed.contractVersion).toBe("1.0");
-    } finally {
-      GitHubPullRequestClient.prototype.fetchAllOpenPullRequests = originalFetchAll;
-      writeSpy.mockRestore();
-    }
+    const combined = stdoutWrites.join("");
+    expect(() => JSON.parse(combined)).not.toThrow();
+    const parsed = JSON.parse(combined);
+    expect(parsed.status).toBe("incomplete");
+    expect(parsed.contractVersion).toBe("1.0");
+  });
+
+  it("renders human output correctly in non-json mode", async () => {
+    const stdoutWrites: string[] = [];
+    const { exitCode, result } = await runShowcase(
+      { mode: "fixture", format: "human" },
+      { stdout: (s) => stdoutWrites.push(s) },
+    );
+
+    expect(exitCode).toBe(0);
+    expect(result.status).toBe("passed");
+    const combined = stdoutWrites.join("");
+    expect(combined).toContain("QA BACKEND TECHNICAL CHALLENGE");
+    expect(combined).toContain("ALL REQUIREMENTS SATISFIED");
+  });
+
+  it("renders human error output on failure", async () => {
+    const stdoutWrites: string[] = [];
+    const fetchImpl = vi.fn().mockRejectedValue(new Error("Simulated failure"));
+
+    const { exitCode } = await runShowcase(
+      { mode: "fixture", format: "human" },
+      {
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        stdout: (s) => stdoutWrites.push(s),
+      },
+    );
+
+    expect(exitCode).toBe(3);
+    const combined = stdoutWrites.join("");
+    expect(combined).toContain("ERROR");
+    expect(combined).toContain("Simulated failure");
   });
 });
