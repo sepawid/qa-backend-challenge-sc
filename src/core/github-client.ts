@@ -2,7 +2,7 @@ import {
   githubPullRequestPageSchema,
   type GitHubPullRequest,
 } from "../schemas/github-pull.schema.js";
-import { getNextLink } from "./link-header.js";
+import { resolveNextLink } from "./link-header.js";
 import {
   HttpError,
   PaginationError,
@@ -299,7 +299,14 @@ export class GitHubPullRequestClient {
 
       // Extract next page link from RFC 8288 Link header
       const linkHeader = response.headers.get("link");
-      currentUrl = getNextLink(linkHeader);
+      const resolvedNext = resolveNextLink(linkHeader);
+      if (resolvedNext.kind === "ambiguous") {
+        throw new PaginationError(
+          `Ambiguous Link header: ${resolvedNext.urls.length} distinct rel=next targets on page ${pageNumber}`,
+          { page: pageNumber, url: sanitizeUrl(currentUrl) },
+        );
+      }
+      currentUrl = resolvedNext.kind === "next" ? resolvedNext.url : undefined;
     }
 
     const completedAt = new Date().toISOString();

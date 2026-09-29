@@ -9,7 +9,9 @@ export {
 export {
   parseLinkHeader,
   getNextLink,
+  resolveNextLink,
   type LinkRelation,
+  type ResolvedNextLink,
 } from "./core/link-header.js";
 
 export {

@@ -301,4 +301,26 @@ describe("Integration: Deterministic multi-page pagination & defensive controls"
       /fragment/i,
     );
   });
+
+  it("fails with PaginationError on ambiguous rel=next (never reports partial data as complete)", async () => {
+    const mockFetch = vi.fn().mockImplementation(async () => {
+      return new Response(JSON.stringify(page1Fixture), {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          link: [
+            '<https://api.github.com/repos/appwrite/appwrite/pulls?state=open&per_page=100&page=2>; rel="next"',
+            '<https://api.github.com/repos/appwrite/appwrite/pulls?state=open&per_page=100&page=3>; rel="next"',
+          ].join(", "),
+        },
+      });
+    });
+
+    const client = new GitHubPullRequestClient({
+      fetchImpl: mockFetch as unknown as typeof fetch,
+    });
+
+    await expect(client.fetchAllOpenPullRequests()).rejects.toThrow(PaginationError);
+  });
 });
+

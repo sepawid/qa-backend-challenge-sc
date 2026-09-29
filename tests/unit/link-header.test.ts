@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getNextLink, parseLinkHeader } from "../../src/core/link-header.js";
+import { getNextLink, parseLinkHeader, resolveNextLink } from "../../src/core/link-header.js";
 
 describe("Core: link-header parser", () => {
   it("returns empty array / undefined for null, undefined, or empty header", () => {
@@ -67,17 +67,38 @@ describe("Core: link-header parser", () => {
     expect(getNextLink(header)).toBe("https://api.github.com/repositories/123/pulls?page=2");
   });
 
-  it("rejects ambiguous headers with two conflicting rel=next links", () => {
+  it("identifies ambiguous headers with multiple conflicting rel=next links", () => {
     const header = [
       '<https://api.github.com/repositories/123/pulls?page=2>; rel="next"',
       '<https://api.github.com/repositories/123/pulls?page=3>; rel="next"',
     ].join(", ");
 
-    // Multiple next links are ambiguous — function must reject by returning undefined
+    const resolved = resolveNextLink(header);
+    expect(resolved).toEqual({
+      kind: "ambiguous",
+      urls: [
+        "https://api.github.com/repositories/123/pulls?page=2",
+        "https://api.github.com/repositories/123/pulls?page=3",
+      ],
+    });
     expect(getNextLink(header)).toBeUndefined();
 
-    // But parseLinkHeader should still parse both entries
+    // parseLinkHeader should still parse both entries
     const links = parseLinkHeader(header);
     expect(links).toHaveLength(2);
+  });
+
+  it("deduplicates identical rel=next links and treats them as unambiguous", () => {
+    const header = [
+      '<https://api.github.com/repositories/123/pulls?page=2>; rel="next"',
+      '<https://api.github.com/repositories/123/pulls?page=2>; rel="next"',
+    ].join(", ");
+
+    const resolved = resolveNextLink(header);
+    expect(resolved).toEqual({
+      kind: "next",
+      url: "https://api.github.com/repositories/123/pulls?page=2",
+    });
+    expect(getNextLink(header)).toBe("https://api.github.com/repositories/123/pulls?page=2");
   });
 });

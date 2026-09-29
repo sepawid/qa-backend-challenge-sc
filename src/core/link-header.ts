@@ -76,14 +76,46 @@ export function parseLinkHeader(header: string | null | undefined): LinkRelation
   });
 }
 
+export type ResolvedNextLink =
+  | { readonly kind: "none" }
+  | { readonly kind: "next"; readonly url: string }
+  | { readonly kind: "ambiguous"; readonly urls: readonly string[] };
+
 /**
- * Extracts the `rel="next"` URL from a Link header, if present.
- * Returns undefined if the header is absent, does not contain a next relation,
- * or contains multiple next relations (rejecting ambiguity).
+ * Resolves the `rel="next"` URL from a Link header.
+ * Identical next URLs are deduplicated.
+ * Returns kind: "none" if no next relation is present,
+ * kind: "next" if exactly one unique next target exists,
+ * or kind: "ambiguous" if multiple distinct next targets exist.
+ */
+export function resolveNextLink(header: string | null | undefined): ResolvedNextLink {
+  const links = parseLinkHeader(header);
+  const nextUrls = Array.from(
+    new Set(
+      links
+        .filter(({ relations }) => relations.includes("next"))
+        .map(({ url }) => url),
+    ),
+  );
+
+  if (nextUrls.length === 0) {
+    return { kind: "none" };
+  }
+
+  const [firstUrl] = nextUrls;
+  if (nextUrls.length === 1 && firstUrl !== undefined) {
+    return { kind: "next", url: firstUrl };
+  }
+
+  return { kind: "ambiguous", urls: nextUrls };
+}
+
+/**
+ * Extracts the `rel="next"` URL from a Link header, if present and unambiguous.
+ * Returns undefined if absent, not present, or ambiguous.
  */
 export function getNextLink(header: string | null | undefined): string | undefined {
-  const links = parseLinkHeader(header);
-  const nextLinks = links.filter(({ relations }) => relations.includes("next"));
-  if (nextLinks.length !== 1) return undefined;
-  return nextLinks[0]?.url;
+  const resolved = resolveNextLink(header);
+  return resolved.kind === "next" ? resolved.url : undefined;
 }
+
