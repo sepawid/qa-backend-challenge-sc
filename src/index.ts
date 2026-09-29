@@ -58,4 +58,5 @@ export {
   buildRunResult,
   type RunResult,
   type SimulationResult,
+  type RunErrorDetails,
 } from "./presentation/presentation-model.js";

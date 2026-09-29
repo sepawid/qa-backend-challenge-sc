@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseEnvironmentConfig } from "../../src/schemas/config.schema.js";
+import { ConfigurationError } from "../../src/core/errors.js";
 
 describe("Schemas: config.schema", () => {
   it("parses valid defaults when environment is empty", () => {
@@ -22,15 +23,19 @@ describe("Schemas: config.schema", () => {
 
   it("throws on invalid timeout values", () => {
     expect(() => parseEnvironmentConfig({ GITHUB_TIMEOUT_MS: "100" })).toThrow(
-      /GITHUB_TIMEOUT_MS must be an integer between 500 and 300000 ms/,
+      ConfigurationError,
     );
-    expect(() => parseEnvironmentConfig({ GITHUB_TIMEOUT_MS: "not-a-number" })).toThrow();
+    expect(() => parseEnvironmentConfig({ GITHUB_TIMEOUT_MS: "not-a-number" })).toThrow(
+      ConfigurationError,
+    );
   });
 
   it("throws on invalid max pages values", () => {
     expect(() => parseEnvironmentConfig({ GITHUB_MAX_PAGES: "0" })).toThrow(
-      /GITHUB_MAX_PAGES must be an integer between 1 and 500/,
+      ConfigurationError,
     );
-    expect(() => parseEnvironmentConfig({ GITHUB_MAX_PAGES: "9999" })).toThrow();
+    expect(() => parseEnvironmentConfig({ GITHUB_MAX_PAGES: "9999" })).toThrow(
+      ConfigurationError,
+    );
   });
 });

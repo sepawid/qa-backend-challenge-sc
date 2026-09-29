@@ -1,4 +1,5 @@
 import type { AggregateResponse } from "../schemas/aggregate.schema.js";
+import { QaChallengeError } from "../core/errors.js";
 
 export type AggregateViolation =
   | {
@@ -57,12 +58,12 @@ export function validateAggregateRules(response: AggregateResponse): AggregateVa
   };
 }
 
-export class AggregateRuleError extends Error {
+export class AggregateRuleError extends QaChallengeError {
   constructor(
     message: string,
     public readonly violations: readonly AggregateViolation[],
   ) {
-    super(message);
+    super("BUSINESS_RULE_VIOLATION", message);
     this.name = "AggregateRuleError";
   }
 }

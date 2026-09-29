@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ConfigurationError } from "../core/errors.js";
 
 export const environmentConfigSchema = z.object({
   GITHUB_TOKEN: z
@@ -55,7 +56,7 @@ export function parseEnvironmentConfig(env: NodeJS.ProcessEnv = process.env): En
 
   if (!result.success) {
     const errorDetails = result.error.issues.map((i) => i.message).join("; ");
-    throw new Error(`Invalid environment configuration: ${errorDetails}`);
+    throw new ConfigurationError(`Invalid environment configuration: ${errorDetails}`);
   }
 
   return result.data;

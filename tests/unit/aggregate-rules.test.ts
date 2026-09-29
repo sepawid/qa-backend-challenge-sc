@@ -4,6 +4,7 @@ import {
   validateAggregateRules,
   AggregateRuleError,
 } from "../../src/business/aggregate-rules.js";
+import { QaChallengeError } from "../../src/core/errors.js";
 import { aggregateResponseSchema } from "../../src/schemas/aggregate.schema.js";
 import { sampleAggregateResponse } from "../../src/demo/fixtures/aggregate-response.js";
 import { aggregateCountMismatchFixture } from "../../src/demo/fixtures/aggregate-count-mismatch.js";
@@ -167,5 +168,11 @@ describe("Business Logic: aggregate-rules (Part 2)", () => {
     const result = validateAggregateRules(validated);
     expect(result.isValid).toBe(true);
     expect(result.violations).toHaveLength(0);
+  });
+
+  it("AggregateRuleError inherits from QaChallengeError with BUSINESS_RULE_VIOLATION code", () => {
+    const error = new AggregateRuleError("Test violation", []);
+    expect(error).toBeInstanceOf(QaChallengeError);
+    expect(error.code).toBe("BUSINESS_RULE_VIOLATION");
   });
 });

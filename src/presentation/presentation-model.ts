@@ -21,8 +21,14 @@ export interface SimulationResult {
   readonly detected: boolean;
 }
 
+export interface RunErrorDetails {
+  readonly code: string;
+  readonly message: string;
+  readonly page?: number | undefined;
+}
+
 export interface ValidationSummary {
-  readonly schemaValid: boolean;
+  readonly schemaValid: boolean | null;
   readonly aggregateValid: boolean;
   readonly violations: readonly AggregateViolation[];
   readonly simulation?: SimulationResult | undefined;
@@ -32,6 +38,7 @@ export interface RunResult {
   readonly contractVersion: "1.1";
   readonly mode: "fixture" | "live";
   readonly status: "passed" | "failed" | "incomplete";
+  readonly error?: RunErrorDetails | undefined;
   readonly source: PresentationSource;
   readonly collection: CollectionMetrics;
   readonly validation: ValidationSummary;
@@ -57,10 +64,11 @@ export function buildRunResult(params: {
   draftRecords: number;
   openNonDraftRecords: number;
   paginationComplete: boolean;
-  schemaValid: boolean;
+  schemaValid: boolean | null;
   aggregateValid: boolean;
   violations?: readonly AggregateViolation[] | undefined;
   simulation?: SimulationResult | undefined;
+  error?: RunErrorDetails | undefined;
   durationMs: number;
   limitations?: readonly string[] | undefined;
 }): RunResult {
@@ -68,6 +76,7 @@ export function buildRunResult(params: {
     contractVersion: "1.1",
     mode: params.mode,
     status: params.status,
+    ...(params.error !== undefined ? { error: params.error } : {}),
     source: {
       provider: "github",
       repository: "appwrite/appwrite",

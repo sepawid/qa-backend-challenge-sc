@@ -1,7 +1,45 @@
 import { describe, expect, it, vi } from "vitest";
-import { runShowcase } from "../../src/presentation/cli.js";
+import {
+  parseCliArgs,
+  runShowcase,
+  mapErrorToExitCode,
+} from "../../src/presentation/cli.js";
+import {
+  ConfigurationError,
+  TransportError,
+  HttpError,
+  SchemaValidationError,
+  PaginationError,
+  QaChallengeError,
+} from "../../src/core/errors.js";
+import { AggregateRuleError } from "../../src/business/aggregate-rules.js";
 
-describe("Presentation: CLI exit codes and incomplete state", () => {
+describe("Presentation: CLI exit codes and error mapping", () => {
+  it("maps error classes to corresponding exit codes", () => {
+    expect(mapErrorToExitCode(new ConfigurationError("bad config"))).toBe(2);
+    expect(mapErrorToExitCode(new TransportError("offline"))).toBe(3);
+    expect(mapErrorToExitCode(new HttpError("not found", 404))).toBe(3);
+    expect(mapErrorToExitCode(new SchemaValidationError("invalid json"))).toBe(4);
+    expect(mapErrorToExitCode(new PaginationError("cycle"))).toBe(5);
+    expect(mapErrorToExitCode(new AggregateRuleError("violation", []))).toBe(1);
+    expect(mapErrorToExitCode(new QaChallengeError("BUSINESS_RULE_VIOLATION", "error"))).toBe(1);
+    expect(mapErrorToExitCode(new Error("generic"))).toBe(1);
+  });
+
+  it("parses valid CLI options correctly", () => {
+    expect(parseCliArgs([])).toEqual({ mode: "fixture", format: "human" });
+    expect(parseCliArgs(["--mode=live", "--format=json"])).toEqual({
+      mode: "live",
+      format: "json",
+    });
+  });
+
+  it("throws ConfigurationError on unknown or invalid CLI options", () => {
+    expect(() => parseCliArgs(["--mode=lvie"])).toThrow(ConfigurationError);
+    expect(() => parseCliArgs(["--format=xml"])).toThrow(ConfigurationError);
+    expect(() => parseCliArgs(["--unknown-flag"])).toThrow(ConfigurationError);
+  });
+
   it("returns exitCode 0 and status 'passed' for successful fixture execution", async () => {
     const stdoutWrites: string[] = [];
     const { exitCode, result } = await runShowcase(
@@ -14,6 +52,24 @@ describe("Presentation: CLI exit codes and incomplete state", () => {
     expect(result.contractVersion).toBe("1.1");
     expect(result.collection.paginationComplete).toBe(true);
     expect(result.validation.schemaValid).toBe(true);
+  });
+
+  it("returns exitCode 2 and valid JSON on stdout when environment configuration is invalid", async () => {
+    const stdoutWrites: string[] = [];
+    const { exitCode, result } = await runShowcase(
+      { mode: "fixture", format: "json" },
+      {
+        env: { GITHUB_MAX_PAGES: "0" },
+        stdout: (s) => stdoutWrites.push(s),
+      },
+    );
+
+    expect(exitCode).toBe(2);
+    expect(result.status).toBe("incomplete");
+    expect(result.error?.code).toBe("CONFIGURATION_ERROR");
+    expect(result.validation.schemaValid).toBeNull();
+    const combined = stdoutWrites.join("");
+    expect(() => JSON.parse(combined)).not.toThrow();
   });
 
   it("returns exitCode 3 and status 'incomplete' for TransportError (network failure)", async () => {
@@ -30,6 +86,8 @@ describe("Presentation: CLI exit codes and incomplete state", () => {
 
     expect(exitCode).toBe(3);
     expect(result.status).toBe("incomplete");
+    expect(result.error?.code).toBe("TRANSPORT_ERROR");
+    expect(result.validation.schemaValid).toBeNull();
     expect(result.collection.paginationComplete).toBe(false);
     expect(result.collection.recordsReceived).toBe(0);
   });
@@ -52,6 +110,24 @@ describe("Presentation: CLI exit codes and incomplete state", () => {
 
     expect(exitCode).toBe(4);
     expect(result.status).toBe("incomplete");
+    expect(result.error?.code).toBe("SCHEMA_VALIDATION_ERROR");
+    expect(result.validation.schemaValid).toBe(false);
+  });
+
+  it("returns exitCode 4 and status 'incomplete' for invalid Part 2 aggregate schema", async () => {
+    const stdoutWrites: string[] = [];
+    const { exitCode, result } = await runShowcase(
+      { mode: "fixture", format: "json" },
+      {
+        canonicalAggregate: { invalid: true },
+        stdout: (s) => stdoutWrites.push(s),
+      },
+    );
+
+    expect(exitCode).toBe(4);
+    expect(result.status).toBe("incomplete");
+    expect(result.error?.code).toBe("SCHEMA_VALIDATION_ERROR");
+    expect(result.validation.schemaValid).toBe(false);
   });
 
   it("returns exitCode 5 and status 'incomplete' for PaginationError", async () => {
@@ -78,6 +154,8 @@ describe("Presentation: CLI exit codes and incomplete state", () => {
 
     expect(exitCode).toBe(5);
     expect(result.status).toBe("incomplete");
+    expect(result.error?.code).toBe("PAGINATION_ERROR");
+    expect(result.validation.schemaValid).toBeNull();
   });
 
   it("returns exitCode 3 and status 'incomplete' for HttpError", async () => {
@@ -98,6 +176,52 @@ describe("Presentation: CLI exit codes and incomplete state", () => {
 
     expect(exitCode).toBe(3);
     expect(result.status).toBe("incomplete");
+    expect(result.error?.code).toBe("HTTP_ERROR");
+    expect(result.validation.schemaValid).toBeNull();
+  });
+
+  it("preserves pagesFetched: 2 and recordsReceived: 4 when error occurs on page 3", async () => {
+    const { page1Fixture, page2Fixture } = await import("../../src/demo/fixtures/github-pulls-pages.js");
+    const fetchImpl = vi.fn().mockImplementation(async (url: string) => {
+      const parsed = new URL(url);
+      const page = parsed.searchParams.get("page");
+      if (page === null || page === "1") {
+        return new Response(JSON.stringify(page1Fixture), {
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+            link: '<https://api.github.com/repos/appwrite/appwrite/pulls?state=open&per_page=100&page=2>; rel="next"',
+          },
+        });
+      }
+      if (page === "2") {
+        return new Response(JSON.stringify(page2Fixture), {
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+            link: '<https://api.github.com/repos/appwrite/appwrite/pulls?state=open&per_page=100&page=3>; rel="next"',
+          },
+        });
+      }
+      return new Response("Internal Server Error", { status: 500 });
+    });
+
+    const stdoutWrites: string[] = [];
+    const { exitCode, result } = await runShowcase(
+      { mode: "fixture", format: "json" },
+      {
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        stdout: (s) => stdoutWrites.push(s),
+      },
+    );
+
+    expect(exitCode).toBe(3);
+    expect(result.status).toBe("incomplete");
+    expect(result.collection.pagesFetched).toBe(2);
+    expect(result.collection.recordsReceived).toBe(4);
+    expect(result.error?.page).toBe(3);
+    expect(result.error?.code).toBe("HTTP_ERROR");
+    expect(result.validation.schemaValid).toBeNull();
   });
 
   it("emits JSON output to stdout even on error when --format=json", async () => {
@@ -217,4 +341,3 @@ describe("Presentation: CLI exit codes and incomplete state", () => {
     });
   });
 });
-
