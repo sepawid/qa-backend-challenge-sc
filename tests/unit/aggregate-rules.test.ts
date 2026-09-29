@@ -170,9 +170,64 @@ describe("Business Logic: aggregate-rules (Part 2)", () => {
     expect(result.violations).toHaveLength(0);
   });
 
+  it("treats high-priority label matching as exact (case-sensitive, untrimmed) per specification", () => {
+    const payload = {
+      product_id: "appwrite-001",
+      total_open_prs: 2,
+      last_updated: "2024-03-20T15:30:00Z",
+      pull_requests: [
+        {
+          id: 5001,
+          title: "feat: case mismatch draft",
+          author: { username: "dev", role: "developer" },
+          status: "OPEN",
+          labels: ["High-Priority"],
+          meta: { is_draft: true, review_comments: 0 },
+        },
+        {
+          id: 5002,
+          title: "feat: whitespace mismatch draft",
+          author: { username: "dev", role: "developer" },
+          status: "OPEN",
+          labels: [" high-priority "],
+          meta: { is_draft: true, review_comments: 0 },
+        },
+      ],
+    };
+
+    const validated = aggregateResponseSchema.parse(payload);
+    const result = validateAggregateRules(validated);
+    expect(result.isValid).toBe(true);
+    expect(result.violations).toHaveLength(0);
+  });
+
+  it("compares total_open_prs against pull_requests.length regardless of individual pull request status", () => {
+    const payload = {
+      product_id: "appwrite-001",
+      total_open_prs: 1,
+      last_updated: "2024-03-20T15:30:00Z",
+      pull_requests: [
+        {
+          id: 6001,
+          title: "fix: closed pr in payload",
+          author: { username: "dev", role: "developer" },
+          status: "CLOSED",
+          labels: [],
+          meta: { is_draft: false, review_comments: 0 },
+        },
+      ],
+    };
+
+    const validated = aggregateResponseSchema.parse(payload);
+    const result = validateAggregateRules(validated);
+    expect(result.isValid).toBe(true);
+    expect(result.violations).toHaveLength(0);
+  });
+
   it("AggregateRuleError inherits from QaChallengeError with BUSINESS_RULE_VIOLATION code", () => {
     const error = new AggregateRuleError("Test violation", []);
     expect(error).toBeInstanceOf(QaChallengeError);
     expect(error.code).toBe("BUSINESS_RULE_VIOLATION");
   });
 });
+
