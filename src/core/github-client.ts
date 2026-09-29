@@ -35,6 +35,7 @@ export interface FetchAllResult {
   readonly pullRequests: readonly GitHubPullRequest[];
   readonly pagesFetched: number;
   readonly recordsReceived: number;
+  readonly duplicatesSkipped: number;
   readonly rateLimit?: RateLimitInfo | undefined;
   readonly startedAt: string;
   readonly completedAt: string;
@@ -88,10 +89,16 @@ export class GitHubPullRequestClient {
     const url = new URL(this.endpoint);
     url.searchParams.set("state", "open");
     url.searchParams.set("per_page", "100");
+    url.searchParams.set("sort", "created");
+    url.searchParams.set("direction", "asc");
     return url.toString();
   }
 
-  private validatePaginationUrl(url: string, page: number): URL {
+  private validatePaginationUrl(
+    url: string,
+    page: number,
+    pinnedRepoId?: string | undefined,
+  ): { parsed: URL; repoId?: string | undefined } {
     let parsed: URL;
     try {
       parsed = new URL(url);
@@ -125,13 +132,21 @@ export class GitHubPullRequestClient {
 
     // GitHub REST API Link headers for pagination may use either the original path
     // (e.g. /repos/owner/repo/pulls) or GitHub's internal repository ID path (e.g. /repositories/:id/pulls).
-    const isExpectedPath =
-      parsed.pathname === this.trustedPath ||
-      (/^\/repositories\/\d+\/pulls$/.test(parsed.pathname) && this.trustedPath.endsWith("/pulls"));
+    const repoMatch = parsed.pathname.match(/^\/repositories\/(\d+)\/pulls$/);
+    const isRepoIdPath = repoMatch !== null && this.trustedPath.endsWith("/pulls");
+    const isOriginalPath = parsed.pathname === this.trustedPath;
 
-    if (!isExpectedPath) {
+    if (!isOriginalPath && !isRepoIdPath) {
       throw new PaginationError(
         `Refusing pagination URL with unexpected path: expected "${this.trustedPath}" but got "${parsed.pathname}"`,
+        { page, url: sanitizeUrl(url) },
+      );
+    }
+
+    const repoId = repoMatch?.[1];
+    if (repoId !== undefined && pinnedRepoId !== undefined && repoId !== pinnedRepoId) {
+      throw new PaginationError(
+        `Refusing pagination URL with mismatched repository ID: expected "${pinnedRepoId}" but got "${repoId}"`,
         { page, url: sanitizeUrl(url) },
       );
     }
@@ -143,7 +158,7 @@ export class GitHubPullRequestClient {
       );
     }
 
-    return parsed;
+    return { parsed, repoId };
   }
 
   async fetchAllOpenPullRequests(): Promise<FetchAllResult> {
@@ -156,6 +171,8 @@ export class GitHubPullRequestClient {
     let currentUrl: string | undefined = this.buildInitialUrl();
     let pageCount = 0;
     let latestRateLimit: RateLimitInfo | undefined;
+    let pinnedRepoId: string | undefined;
+    let duplicatesSkipped = 0;
 
     while (currentUrl) {
       const pageNumber = pageCount + 1;
@@ -174,7 +191,10 @@ export class GitHubPullRequestClient {
         );
       }
 
-      this.validatePaginationUrl(currentUrl, pageNumber);
+      const { repoId } = this.validatePaginationUrl(currentUrl, pageNumber, pinnedRepoId);
+      if (repoId !== undefined && pinnedRepoId === undefined) {
+        pinnedRepoId = repoId;
+      }
       visitedUrls.add(currentUrl);
       pageCount = pageNumber;
 
@@ -229,14 +249,37 @@ export class GitHubPullRequestClient {
       }
 
       if (!response.ok) {
+        let responseBodySnippet = "";
+        try {
+          const rawBody = await response.text();
+          if (rawBody) {
+            responseBodySnippet = rawBody.slice(0, 200).trim();
+          }
+        } catch {
+          // Ignore error reading body
+        }
+
+        let message = `GitHub API responded with HTTP ${response.status} on page ${pageNumber}`;
+        if (responseBodySnippet) {
+          message += `: ${responseBodySnippet}`;
+        }
+        if (
+          (response.status === 403 || response.status === 429) &&
+          latestRateLimit?.remaining === 0 &&
+          latestRateLimit.reset
+        ) {
+          message += ` (rate limit reset: ${latestRateLimit.reset})`;
+        }
+
         throw new HttpError(
-          `GitHub API responded with HTTP ${response.status} on page ${pageNumber}`,
+          message,
           response.status,
           {
             page: pageNumber,
             url: sanitizeUrl(currentUrl),
             rateLimitRemaining: latestRateLimit?.remaining,
             rateLimitReset: latestRateLimit?.reset,
+            ...(responseBodySnippet ? { responseBody: responseBodySnippet } : {}),
           },
         );
       }
@@ -267,18 +310,27 @@ export class GitHubPullRequestClient {
         );
       }
 
-      // Detect duplicate IDs across pages
+      // 1. Detect duplicate IDs within the same page (API defect)
+      const pageIds = new Set<number>();
       for (const pr of parseResult.data) {
-        if (seenIds.has(pr.id)) {
+        if (pageIds.has(pr.id)) {
           throw new PaginationError(
-            `Duplicate pull request id=${pr.id} encountered on page ${pageNumber}`,
+            `Duplicate pull request id=${pr.id} encountered within page ${pageNumber}`,
             { page: pageNumber, pullRequestId: pr.id, url: sanitizeUrl(currentUrl) },
           );
         }
-        seenIds.add(pr.id);
+        pageIds.add(pr.id);
       }
 
-      pullRequests.push(...parseResult.data);
+      // 2. Handle duplicates across pages (shifted records deduplicated)
+      for (const pr of parseResult.data) {
+        if (seenIds.has(pr.id)) {
+          duplicatesSkipped += 1;
+        } else {
+          seenIds.add(pr.id);
+          pullRequests.push(pr);
+        }
+      }
 
       const pageDuration = Date.now() - pageStart;
       if (this.onPageFetched) {
@@ -316,6 +368,7 @@ export class GitHubPullRequestClient {
       pullRequests,
       pagesFetched: pageCount,
       recordsReceived: pullRequests.length,
+      duplicatesSkipped,
       rateLimit: latestRateLimit,
       startedAt,
       completedAt,

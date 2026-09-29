@@ -162,6 +162,10 @@ export async function runShowcase(
       log(formatter.metric("Draft Records Excluded", draftCount));
       log(formatter.metric("FINAL OPEN NON-DRAFT COUNT", finalOpenNonDraftCount, "Official Challenge Metric"));
       log(formatter.metric("Pagination Completed", part1Result.isComplete ? "YES (All pages followed)" : "NO"));
+      if (part1Result.duplicatesSkipped > 0) {
+        log(formatter.metric("Duplicates Skipped", part1Result.duplicatesSkipped));
+        log(formatter.yellow(`  Notice: ${part1Result.duplicatesSkipped} duplicate record(s) shifted across pages were deduplicated.`));
+      }
       if (part1Result.rateLimit?.remaining !== undefined) {
         log(formatter.metric("GitHub Rate-Limit Remaining", part1Result.rateLimit.remaining));
       }
@@ -253,6 +257,7 @@ export async function runShowcase(
       fixtureName: args.mode === "fixture" ? "multi-page-deterministic-fixture" : undefined,
       pagesFetched: part1Result.pagesFetched,
       recordsReceived: part1Result.recordsReceived,
+      duplicatesSkipped: part1Result.duplicatesSkipped,
       draftRecords: draftCount,
       openNonDraftRecords: finalOpenNonDraftCount,
       paginationComplete: part1Result.isComplete,
@@ -319,6 +324,7 @@ export async function runShowcase(
       fixtureName: args.mode === "fixture" ? "multi-page-deterministic-fixture" : undefined,
       pagesFetched,
       recordsReceived,
+      duplicatesSkipped: 0,
       draftRecords: 0,
       openNonDraftRecords: 0,
       paginationComplete: false,

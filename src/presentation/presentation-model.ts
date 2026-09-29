@@ -11,6 +11,7 @@ export interface PresentationSource {
 export interface CollectionMetrics {
   readonly pagesFetched: number;
   readonly recordsReceived: number;
+  readonly duplicatesSkipped: number;
   readonly draftRecords: number;
   readonly openNonDraftRecords: number;
   readonly paginationComplete: boolean;
@@ -61,6 +62,7 @@ export function buildRunResult(params: {
   fixtureName?: string | undefined;
   pagesFetched: number;
   recordsReceived: number;
+  duplicatesSkipped?: number | undefined;
   draftRecords: number;
   openNonDraftRecords: number;
   paginationComplete: boolean;
@@ -87,6 +89,7 @@ export function buildRunResult(params: {
     collection: {
       pagesFetched: params.pagesFetched,
       recordsReceived: params.recordsReceived,
+      duplicatesSkipped: params.duplicatesSkipped ?? 0,
       draftRecords: params.draftRecords,
       openNonDraftRecords: params.openNonDraftRecords,
       paginationComplete: params.paginationComplete,

@@ -140,7 +140,7 @@ describe("Integration: Deterministic multi-page pagination & defensive controls"
     );
   });
 
-  it("fails with PaginationError if duplicate PR IDs appear across different pages", async () => {
+  it("deduplicates records if duplicate PR IDs appear across different pages", async () => {
     const mockFetch = vi.fn().mockImplementation(async (url: string) => {
       const parsed = new URL(url);
       const isPage2 = parsed.searchParams.get("page") === "2";
@@ -162,9 +162,77 @@ describe("Integration: Deterministic multi-page pagination & defensive controls"
       fetchImpl: mockFetch as unknown as typeof fetch,
     });
 
-    await expect(client.fetchAllOpenPullRequests()).rejects.toThrowError(
-      /Duplicate pull request id=101/i,
-    );
+    const result = await client.fetchAllOpenPullRequests();
+    expect(result.pagesFetched).toBe(2);
+    expect(result.duplicatesSkipped).toBe(2);
+    expect(result.recordsReceived).toBe(2);
+    expect(result.pullRequests).toHaveLength(2);
+  });
+
+  it("fails with PaginationError if duplicate PR IDs appear within the same page", async () => {
+    const duplicateWithinPage = [page1Fixture[0], page1Fixture[0]];
+    const mockFetch = vi.fn().mockImplementation(async () => {
+      return new Response(JSON.stringify(duplicateWithinPage), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+
+    const client = new GitHubPullRequestClient({
+      fetchImpl: mockFetch as unknown as typeof fetch,
+    });
+
+    await expect(client.fetchAllOpenPullRequests()).rejects.toThrow(PaginationError);
+    await expect(client.fetchAllOpenPullRequests()).rejects.toThrow(/within page 1/i);
+  });
+
+  it("fails with PaginationError if repository ID in next link changes", async () => {
+    const mockFetch = vi.fn().mockImplementation(async (url: string) => {
+      const parsed = new URL(url);
+      if (parsed.pathname === "/repos/appwrite/appwrite/pulls") {
+        return new Response(JSON.stringify(page1Fixture), {
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+            link: '<https://api.github.com/repositories/123/pulls?page=2>; rel="next"',
+          },
+        });
+      }
+      return new Response(JSON.stringify(page2Fixture), {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          link: '<https://api.github.com/repositories/999/pulls?page=3>; rel="next"',
+        },
+      });
+    });
+
+    const client = new GitHubPullRequestClient({
+      fetchImpl: mockFetch as unknown as typeof fetch,
+    });
+
+    await expect(client.fetchAllOpenPullRequests()).rejects.toThrow(PaginationError);
+    await expect(client.fetchAllOpenPullRequests()).rejects.toThrow(/mismatched repository ID/i);
+  });
+
+  it("constructs initial URL with sort=created and direction=asc", async () => {
+    let initialUrl = "";
+    const mockFetch = vi.fn().mockImplementation(async (url: string) => {
+      initialUrl = url;
+      return new Response(JSON.stringify([]), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+
+    const client = new GitHubPullRequestClient({
+      fetchImpl: mockFetch as unknown as typeof fetch,
+    });
+
+    await client.fetchAllOpenPullRequests();
+    const parsed = new URL(initialUrl);
+    expect(parsed.searchParams.get("sort")).toBe("created");
+    expect(parsed.searchParams.get("direction")).toBe("asc");
   });
 
   it("enforces maxPages limit and fails without presenting a partial result as complete", async () => {
@@ -203,7 +271,7 @@ describe("Integration: Deterministic multi-page pagination & defensive controls"
     );
   });
 
-  it("reports HTTP 403 with rate limit diagnostics on failure", async () => {
+  it("reports HTTP 403 with rate limit diagnostics and body snippet on failure", async () => {
     const mockFetch = vi.fn().mockImplementation(async () => {
       return new Response("API rate limit exceeded", {
         status: 403,
@@ -229,6 +297,9 @@ describe("Integration: Deterministic multi-page pagination & defensive controls"
     const httpErr = caughtError as HttpError;
     expect(httpErr.context.status).toBe(403);
     expect(httpErr.context.rateLimitRemaining).toBe(0);
+    expect(httpErr.message).toContain("API rate limit exceeded");
+    expect(httpErr.message).toContain("rate limit reset:");
+    expect(httpErr.context.responseBody).toBe("API rate limit exceeded");
   });
 
   it("refuses pagination URLs with an unexpected path (defense against endpoint hijacking)", async () => {

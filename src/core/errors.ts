@@ -15,6 +15,7 @@ export interface ErrorContext {
   readonly zodIssues?: string[] | undefined;
   readonly pullRequestId?: number | undefined;
   readonly ruleCode?: string | undefined;
+  readonly responseBody?: string | undefined;
 }
 
 export class QaChallengeError extends Error {
