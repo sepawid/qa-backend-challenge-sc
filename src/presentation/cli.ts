@@ -341,21 +341,3 @@ export async function runShowcase(
     return { exitCode, result: incompleteResult };
   }
 }
-
-// Entrypoint execution when invoked directly
-if (process.argv[1] && process.argv[1].endsWith("cli.ts")) {
-  try {
-    const args = parseCliArgs();
-    runShowcase(args)
-      .then(({ exitCode }) => {
-        process.exit(exitCode);
-      })
-      .catch((error) => {
-        console.error("\nShowcase execution encountered an error:", error instanceof Error ? error.message : String(error));
-        process.exit(mapErrorToExitCode(error));
-      });
-  } catch (error) {
-    console.error("\nShowcase execution encountered an error:", error instanceof Error ? error.message : String(error));
-    process.exit(mapErrorToExitCode(error));
-  }
-}

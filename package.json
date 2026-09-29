@@ -10,9 +10,10 @@
   "scripts": {
     "start": "npm run demo",
     "demo": "npm run demo:fixture",
-    "demo:fixture": "tsx src/presentation/cli.ts --mode=fixture",
-    "demo:live": "tsx src/presentation/cli.ts --mode=live",
-    "demo:json": "tsx src/presentation/cli.ts --mode=fixture --format=json",
+    "demo:fixture": "tsx src/presentation/main.ts --mode=fixture",
+    "demo:live": "tsx src/presentation/main.ts --mode=live",
+    "demo:json": "tsx src/presentation/main.ts --mode=fixture --format=json",
+    "start:dist": "node dist/presentation/main.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:live": "vitest run --config vitest.live.config.ts",
