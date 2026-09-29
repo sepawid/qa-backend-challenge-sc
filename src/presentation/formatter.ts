@@ -73,25 +73,5 @@ export class TerminalFormatter {
     const extraStr = extra ? this.dim(` (${extra})`) : "";
     return `  • ${padded}: ${valStr}${extraStr}`;
   }
-
-  box(content: string, type: "info" | "pass" | "sim" | "fail" = "info"): string {
-    const lines = content.split("\n");
-    const width = Math.max(...lines.map((l) => l.length), 50);
-    const top = `┌${"─".repeat(width + 2)}┐`;
-    const bottom = `└${"─".repeat(width + 2)}┘`;
-    const formattedLines = lines.map((l) => `│ ${l.padEnd(width, " ")} │`);
-
-    const result = [top, ...formattedLines, bottom].join("\n");
-    switch (type) {
-      case "pass":
-        return this.green(result);
-      case "fail":
-        return this.red(result);
-      case "sim":
-        return this.yellow(result);
-      case "info":
-      default:
-        return this.dim(result);
-    }
-  }
 }
+

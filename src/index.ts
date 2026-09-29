@@ -60,3 +60,25 @@ export {
   type SimulationResult,
   type RunErrorDetails,
 } from "./presentation/presentation-model.js";
+
+export {
+  parseCliArgs,
+  runShowcase,
+  mapErrorToExitCode,
+  type CliArguments,
+  type ShowcaseDeps,
+} from "./presentation/cli.js";
+
+export {
+  TerminalFormatter,
+  type FormatterOptions,
+} from "./presentation/formatter.js";
+
+export {
+  parseEnvironmentConfig,
+  environmentConfigSchema,
+  cliOptionsSchema,
+  type EnvironmentConfig,
+  type CliOptions,
+} from "./schemas/config.schema.js";
+

@@ -31,10 +31,7 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Deterministic Unit & Integration Tests
-        run: npm test
-
-      - name: Test Coverage
+      - name: Deterministic Unit & Integration Tests (Coverage)
         run: npm run test:coverage
 
       - name: Build TypeScript to JavaScript

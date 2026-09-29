@@ -11,7 +11,6 @@ describe("Presentation: TerminalFormatter", () => {
     expect(formatter.badge("PASS", "pass")).toBe("[PASS]");
     expect(formatter.metric("Metric", 42)).toContain("• Metric");
     expect(formatter.banner("Title")).toContain("Title");
-    expect(formatter.box("content")).toContain("content");
   });
 
   it("formats text with colors when TTY is true and NO_COLOR is false", () => {
@@ -21,8 +20,6 @@ describe("Presentation: TerminalFormatter", () => {
     expect(formatter.badge("FAIL", "fail")).toContain("FAIL");
     expect(formatter.badge("SIM", "sim")).toContain("SIM");
     expect(formatter.badge("INFO", "info")).toContain("INFO");
-    expect(formatter.box("Pass Box", "pass")).toContain("Pass Box");
-    expect(formatter.box("Fail Box", "fail")).toContain("Fail Box");
-    expect(formatter.box("Sim Box", "sim")).toContain("Sim Box");
   });
 });
+
