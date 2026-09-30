@@ -23,7 +23,8 @@ describe("Presentation: CLI exit codes and error mapping", () => {
     expect(mapErrorToExitCode(new PaginationError("cycle"))).toBe(5);
     expect(mapErrorToExitCode(new AggregateRuleError("violation", []))).toBe(1);
     expect(mapErrorToExitCode(new QaChallengeError("BUSINESS_RULE_VIOLATION", "error"))).toBe(1);
-    expect(mapErrorToExitCode(new Error("generic"))).toBe(1);
+    expect(mapErrorToExitCode(new Error("generic"))).toBe(6);
+    expect(mapErrorToExitCode(new TypeError("undefined is not a function"))).toBe(6);
   });
 
   it("parses valid CLI options correctly", () => {
@@ -114,7 +115,7 @@ describe("Presentation: CLI exit codes and error mapping", () => {
     expect(result.validation.schemaValid).toBe(false);
   });
 
-  it("returns exitCode 4 and status 'incomplete' for invalid Part 2 aggregate schema", async () => {
+  it("returns exitCode 4 and preserves Part 1 metrics when Part 2 schema is invalid", async () => {
     const stdoutWrites: string[] = [];
     const { exitCode, result } = await runShowcase(
       { mode: "fixture", format: "json" },
@@ -128,6 +129,11 @@ describe("Presentation: CLI exit codes and error mapping", () => {
     expect(result.status).toBe("incomplete");
     expect(result.error?.code).toBe("SCHEMA_VALIDATION_ERROR");
     expect(result.validation.schemaValid).toBe(false);
+    expect(result.collection.pagesFetched).toBe(3);
+    expect(result.collection.recordsReceived).toBe(6);
+    expect(result.collection.openNonDraftRecords).toBe(4);
+    expect(result.collection.draftRecords).toBe(2);
+    expect(result.collection.paginationComplete).toBe(true);
   });
 
   it("returns exitCode 5 and status 'incomplete' for PaginationError", async () => {
@@ -305,8 +311,9 @@ describe("Presentation: CLI exit codes and error mapping", () => {
 
     expect(exitCode).toBe(1);
     const combined = stdoutWrites.join("");
-    expect(combined).toContain("FAIL");
-    expect(combined).not.toContain("Rule 1 (Integrity: total_open_prs == prs.length): [PASS]");
+    expect(combined).toMatch(/Rule 1.*FAIL/);
+    expect(combined).not.toMatch(/Rule 1.*PASS/);
+    expect(combined).toMatch(/\[Violation\].*expected total_open_prs=5.*contains 1 item\(s\)/);
   });
 
   it("fails with status 'failed' and exitCode 1 when simulation does not detect expected violation", async () => {

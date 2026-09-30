@@ -195,40 +195,39 @@ npm run demo:json
 }
 ```
 
-In failure scenarios, structured error details are included in the JSON payload:
+In failure scenarios, structured error details conforming to the same `RunResult` contract are emitted:
 
 ```json
 {
   "contractVersion": "1.1",
-  "status": "failed",
-  "timestamp": "2026-09-29T17:00:00.000Z",
-  "durationMs": 12,
-  "collection": {
-    "mode": "live",
-    "pagesFetched": 2,
-    "recordsReceived": 200,
-    "isComplete": false,
-    "duplicatesSkipped": 0
-  },
-  "part1": { "status": "failed", "count": 0 },
-  "part2": {
-    "canonical": {
-      "schemaValid": null,
-      "rulesEvaluated": 0,
-      "passed": false,
-      "violations": []
-    },
-    "simulation": {
-      "expectedCode": "HIGH_PRIORITY_PR_IS_DRAFT",
-      "detected": false,
-      "passed": false
-    }
-  },
+  "mode": "live",
+  "status": "incomplete",
   "error": {
     "code": "HTTP_ERROR",
     "message": "GitHub API responded with HTTP 403 Forbidden: API rate limit exceeded...",
     "page": 3
-  }
+  },
+  "source": {
+    "provider": "github",
+    "repository": "appwrite/appwrite",
+    "observedFrom": "2026-09-30T07:00:00.000Z",
+    "observedTo": "2026-09-30T07:00:00.012Z"
+  },
+  "collection": {
+    "pagesFetched": 2,
+    "recordsReceived": 200,
+    "duplicatesSkipped": 0,
+    "draftRecords": 0,
+    "openNonDraftRecords": 0,
+    "paginationComplete": false
+  },
+  "validation": {
+    "schemaValid": null,
+    "aggregateValid": false,
+    "violations": []
+  },
+  "durationMs": 12,
+  "limitations": [ ... ]
 }
 ```
 
@@ -241,6 +240,7 @@ In failure scenarios, structured error details are included in the JSON payload:
 | `3` | Transport / HTTP Error | Network socket failure, request timeout, HTTP 4xx/5xx responses, or unauthenticated rate limit exhaustion. |
 | `4` | Schema Validation Error | Wire-schema validation failed (Zod parsing error on GitHub PR page or aggregate response). |
 | `5` | Pagination Anomaly | RFC 8288 ambiguous `rel="next"` links, pagination loop detected, repository mismatch, or intra-page duplicate IDs. |
+| `6` | Unexpected Error | Unhandled internal exception (e.g. `TypeError`, system failure) distinct from domain/challenge assertions. |
 
 ---
 

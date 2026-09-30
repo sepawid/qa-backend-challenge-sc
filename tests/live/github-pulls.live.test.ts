@@ -14,7 +14,7 @@ const searchResponseSchema = z.object({
 
 type SearchResponse = z.infer<typeof searchResponseSchema>;
 
-async function fetchSearchTotalCount(query: string, token?: string): Promise<SearchResponse> {
+async function fetchSearchTotalCount(query: string, token?: string): Promise<SearchResponse | null> {
   const url = `https://api.github.com/search/issues?q=${encodeURIComponent(query)}&per_page=1`;
   const headers: Record<string, string> = {
     Accept: "application/vnd.github+json",
@@ -25,6 +25,12 @@ async function fetchSearchTotalCount(query: string, token?: string): Promise<Sea
   }
 
   const response = await fetch(url, { headers });
+  if (response.status === 403 || response.status === 429) {
+    console.warn(
+      `[LIVE SEARCH ORACLE] GitHub Search API rate-limited (${response.status}); oracle comparison will be skipped.`,
+    );
+    return null;
+  }
   if (!response.ok) {
     throw new Error(`GitHub Search API error (${response.status}): ${response.statusText}`);
   }
@@ -36,7 +42,10 @@ async function fetchSearchTotalCount(query: string, token?: string): Promise<Sea
 describe("Live Integration: Appwrite repository open pull requests", () => {
   it("exhaustively navigates all live pages via rel=next, validates contracts, and calculates accurate open non-draft total", async () => {
     const config = parseEnvironmentConfig();
-    const liveTolerance = Number(process.env["LIVE_TOLERANCE"] ?? 3);
+    const rawTolerance = process.env["LIVE_TOLERANCE"];
+    const parsedTolerance = rawTolerance !== undefined ? Number(rawTolerance) : 3;
+    const liveTolerance =
+      Number.isSafeInteger(parsedTolerance) && parsedTolerance >= 0 ? parsedTolerance : 3;
 
     const client = new GitHubPullRequestClient({
       token: config.GITHUB_TOKEN,
@@ -57,8 +66,7 @@ describe("Live Integration: Appwrite repository open pull requests", () => {
       result.pagesFetched === expectedMinPages || result.pagesFetched === expectedMinPages + 1,
     ).toBe(true);
 
-    // 2. Schema compliance & record uniqueness across entire live dataset
-    const seenIds = new Set<number>();
+    // 2. Schema compliance & PR issue number uniqueness across entire live dataset
     const seenNumbers = new Set<number>();
 
     for (const pr of result.pullRequests) {
@@ -68,9 +76,6 @@ describe("Live Integration: Appwrite repository open pull requests", () => {
       expect(typeof pr.number).toBe("number");
       expect(typeof pr.title).toBe("string");
       expect(pr.html_url).toMatch(/^https:\/\/github\.com\/appwrite\/appwrite\/pull\/\d+$/);
-
-      expect(seenIds.has(pr.id)).toBe(false);
-      seenIds.add(pr.id);
 
       expect(seenNumbers.has(pr.number)).toBe(false);
       seenNumbers.add(pr.number);
@@ -95,6 +100,13 @@ describe("Live Integration: Appwrite repository open pull requests", () => {
       fetchSearchTotalCount("repo:appwrite/appwrite is:pr is:open", config.GITHUB_TOKEN),
     ]);
 
+    const nonDraftOracleSummary = nonDraftSearchResult
+      ? `${nonDraftSearchResult.total_count} (incomplete: ${nonDraftSearchResult.incomplete_results})`
+      : "rate-limited (skipped)";
+    const openOracleSummary = openSearchResult
+      ? `${openSearchResult.total_count} (incomplete: ${openSearchResult.incomplete_results})`
+      : "rate-limited (skipped)";
+
     console.info(
       `[LIVE GITHUB VERIFICATION SUMMARY]\n` +
         `  • Repository: appwrite/appwrite\n` +
@@ -105,13 +117,13 @@ describe("Live Integration: Appwrite repository open pull requests", () => {
         `  • Final Open Non-Draft Count: ${finalCount}\n` +
         `  • Duplicates Skipped Across Pages: ${result.duplicatesSkipped}\n` +
         `  • GitHub Rate-Limit Remaining: ${result.rateLimit?.remaining ?? "unknown"}\n` +
-        `  • Search Oracle (Open Non-Draft): ${nonDraftSearchResult.total_count} (incomplete: ${nonDraftSearchResult.incomplete_results})\n` +
-        `  • Search Oracle (Total Open): ${openSearchResult.total_count} (incomplete: ${openSearchResult.incomplete_results})`,
+        `  • Search Oracle (Open Non-Draft): ${nonDraftOracleSummary}\n` +
+        `  • Search Oracle (Total Open): ${openOracleSummary}`,
     );
 
-    if (nonDraftSearchResult.incomplete_results) {
+    if (!nonDraftSearchResult || nonDraftSearchResult.incomplete_results) {
       console.warn(
-        "[LIVE SEARCH ORACLE] Incomplete results returned for open non-draft PR search query; skipping oracle assertion.",
+        "[LIVE SEARCH ORACLE] Incomplete results or rate-limit encountered for open non-draft PR search query; skipping oracle assertion.",
       );
     } else {
       const nonDraftDelta = Math.abs(finalCount - nonDraftSearchResult.total_count);
@@ -121,9 +133,9 @@ describe("Live Integration: Appwrite repository open pull requests", () => {
       expect(nonDraftDelta).toBeLessThanOrEqual(liveTolerance);
     }
 
-    if (openSearchResult.incomplete_results) {
+    if (!openSearchResult || openSearchResult.incomplete_results) {
       console.warn(
-        "[LIVE SEARCH ORACLE] Incomplete results returned for total open PR search query; skipping oracle assertion.",
+        "[LIVE SEARCH ORACLE] Incomplete results or rate-limit encountered for total open PR search query; skipping oracle assertion.",
       );
     } else {
       const openDelta = Math.abs(result.recordsReceived - openSearchResult.total_count);

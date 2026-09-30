@@ -1,5 +1,6 @@
 import { parseCliArgs, runShowcase, mapErrorToExitCode } from "./cli.js";
-import { ConfigurationError } from "../core/errors.js";
+import { buildRunResult } from "./presentation-model.js";
+import { QaChallengeError, ConfigurationError } from "../core/errors.js";
 
 async function main(): Promise<void> {
   let format: "human" | "json" = "human";
@@ -17,46 +18,43 @@ async function main(): Promise<void> {
       rawArgs.some((arg) => arg.startsWith("--format=json"));
 
     if (wantsJson) {
-      console.log(
-        JSON.stringify(
-          {
-            contractVersion: "1.1",
-            status: "failed",
-            timestamp: new Date().toISOString(),
-            durationMs: 0,
-            collection: {
-              mode: "fixture",
-              pagesFetched: 0,
-              recordsReceived: 0,
-              isComplete: false,
-              duplicatesSkipped: 0,
-            },
-            part1: { status: "not_run", count: 0 },
-            part2: {
-              canonical: {
-                schemaValid: false,
-                rulesEvaluated: 0,
-                passed: false,
-                violations: [],
-              },
-              simulation: {
-                expectedCode: "HIGH_PRIORITY_PR_IS_DRAFT",
-                detected: false,
-                passed: false,
-              },
-            },
-            error: {
-              code:
-                error instanceof ConfigurationError
-                  ? "CONFIGURATION_ERROR"
-                  : "UNEXPECTED_ERROR",
-              message: error instanceof Error ? error.message : String(error),
-            },
-          },
-          null,
-          2,
-        ),
-      );
+      const modeArg = rawArgs.find((arg) => arg.startsWith("--mode="));
+      const modeValue = modeArg ? modeArg.slice("--mode=".length) : undefined;
+      const mode: "fixture" | "live" = modeValue === "live" ? "live" : "fixture";
+      const nowIso = new Date().toISOString();
+
+      let errorCode = "UNEXPECTED_ERROR";
+      if (error instanceof ConfigurationError) {
+        errorCode = "CONFIGURATION_ERROR";
+      } else if (error instanceof QaChallengeError) {
+        errorCode = error.code;
+      } else if (error instanceof Error) {
+        errorCode = error.name;
+      }
+
+      const fallbackResult = buildRunResult({
+        mode,
+        status: "incomplete",
+        error: {
+          code: errorCode,
+          message: error instanceof Error ? error.message : String(error),
+        },
+        observedFrom: nowIso,
+        observedTo: nowIso,
+        fixtureName: mode === "fixture" ? "multi-page-deterministic-fixture" : undefined,
+        pagesFetched: 0,
+        recordsReceived: 0,
+        duplicatesSkipped: 0,
+        draftRecords: 0,
+        openNonDraftRecords: 0,
+        paginationComplete: false,
+        schemaValid: null,
+        aggregateValid: false,
+        violations: [],
+        durationMs: 0,
+      });
+
+      console.log(`${JSON.stringify(fallbackResult, null, 2)}\n`);
     } else {
       console.error(
         "\nShowcase execution encountered an error:",

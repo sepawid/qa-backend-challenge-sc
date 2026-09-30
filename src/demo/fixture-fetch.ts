@@ -18,7 +18,7 @@ export function createFixtureFetch(): typeof fetch {
         status: 200,
         headers: {
           "content-type": "application/json",
-          link: '<https://api.github.com/repos/appwrite/appwrite/pulls?state=open&per_page=100&page=2>; rel="next"',
+          link: '<https://api.github.com/repos/appwrite/appwrite/pulls?state=open&per_page=100&sort=created&direction=asc&page=2>; rel="next"',
           "x-ratelimit-remaining": "59",
         },
       });
@@ -29,7 +29,7 @@ export function createFixtureFetch(): typeof fetch {
         status: 200,
         headers: {
           "content-type": "application/json",
-          link: '<https://api.github.com/repos/appwrite/appwrite/pulls?state=open&per_page=100&page=3>; rel="next"',
+          link: '<https://api.github.com/repos/appwrite/appwrite/pulls?state=open&per_page=100&sort=created&direction=asc&page=3>; rel="next"',
           "x-ratelimit-remaining": "58",
         },
       });

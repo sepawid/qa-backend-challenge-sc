@@ -80,7 +80,7 @@ export function mapErrorToExitCode(error: unknown): number {
   if (error instanceof SchemaValidationError) return 4;
   if (error instanceof PaginationError) return 5;
   if (error instanceof QaChallengeError) return 1;
-  return 1;
+  return 6;
 }
 
 export async function runShowcase(
@@ -105,6 +105,10 @@ export async function runShowcase(
 
   let pagesFetched = 0;
   let recordsReceived = 0;
+  let duplicatesSkipped = 0;
+  let draftRecords = 0;
+  let openNonDraftRecords = 0;
+  let paginationComplete = false;
 
   try {
     const envConfig = parseEnvironmentConfig(env);
@@ -152,16 +156,18 @@ export async function runShowcase(
     pagesFetched = part1Result.pagesFetched;
     recordsReceived = part1Result.recordsReceived;
 
-    const finalOpenNonDraftCount = countOpenNonDraftPullRequests(part1Result.pullRequests);
-    const draftCount = part1Result.pullRequests.filter((pr) => pr.draft).length;
+    duplicatesSkipped = part1Result.duplicatesSkipped;
+    draftRecords = part1Result.pullRequests.filter((pr) => pr.draft).length;
+    openNonDraftRecords = countOpenNonDraftPullRequests(part1Result.pullRequests);
+    paginationComplete = part1Result.isComplete;
 
     if (!isJson) {
       log(formatter.section("PART 1 RESULTS"));
       log(formatter.metric("Pages Fetched", part1Result.pagesFetched));
       log(formatter.metric("Total Records Retrieved", part1Result.recordsReceived));
-      log(formatter.metric("Draft Records Excluded", draftCount));
-      log(formatter.metric("FINAL OPEN NON-DRAFT COUNT", finalOpenNonDraftCount, "Official Challenge Metric"));
-      log(formatter.metric("Pagination Completed", part1Result.isComplete ? "YES (All pages followed)" : "NO"));
+      log(formatter.metric("Draft Records Excluded", draftRecords));
+      log(formatter.metric("FINAL OPEN NON-DRAFT COUNT", openNonDraftRecords, "Official Challenge Metric"));
+      log(formatter.metric("Pagination Completed", paginationComplete ? "YES (All pages followed)" : "NO"));
       if (part1Result.duplicatesSkipped > 0) {
         log(formatter.metric("Duplicates Skipped", part1Result.duplicatesSkipped));
         log(formatter.yellow(`  Notice: ${part1Result.duplicatesSkipped} duplicate record(s) shifted across pages were deduplicated.`));
@@ -258,8 +264,8 @@ export async function runShowcase(
       pagesFetched: part1Result.pagesFetched,
       recordsReceived: part1Result.recordsReceived,
       duplicatesSkipped: part1Result.duplicatesSkipped,
-      draftRecords: draftCount,
-      openNonDraftRecords: finalOpenNonDraftCount,
+      draftRecords,
+      openNonDraftRecords,
       paginationComplete: part1Result.isComplete,
       schemaValid: true,
       aggregateValid: canonicalRules.isValid,
@@ -324,10 +330,10 @@ export async function runShowcase(
       fixtureName: args.mode === "fixture" ? "multi-page-deterministic-fixture" : undefined,
       pagesFetched,
       recordsReceived,
-      duplicatesSkipped: 0,
-      draftRecords: 0,
-      openNonDraftRecords: 0,
-      paginationComplete: false,
+      duplicatesSkipped,
+      draftRecords,
+      openNonDraftRecords,
+      paginationComplete,
       schemaValid: isSchemaError ? false : null,
       aggregateValid: false,
       violations: [],
