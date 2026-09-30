@@ -13,7 +13,7 @@ async function main(): Promise<void> {
     const args = parseCliArgs(process.argv.slice(2));
     format = args.format;
     const { exitCode } = await runShowcase(args);
-    process.exit(exitCode);
+    process.exitCode = exitCode;
   } catch (error) {
     const exitCode = mapErrorToExitCode(error);
     const requested = detectRequestedOutput(process.argv.slice(2));
@@ -37,7 +37,7 @@ async function main(): Promise<void> {
         error instanceof Error ? error.message : String(error),
       );
     }
-    process.exit(exitCode);
+    process.exitCode = exitCode;
   }
 }
 
