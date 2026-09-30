@@ -3,6 +3,9 @@ import {
   parseCliArgs,
   runShowcase,
   mapErrorToExitCode,
+  detectRequestedOutput,
+  describeError,
+  buildErrorResult,
 } from "../../src/presentation/cli.js";
 import {
   ConfigurationError,
@@ -351,4 +354,232 @@ describe("Presentation: CLI exit codes and error mapping", () => {
       detected: true,
     });
   });
+
+  it("runs showcase with default stdout, stderr, and now dependencies", async () => {
+    const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+
+    try {
+      const { exitCode, result } = await runShowcase({ mode: "fixture", format: "json" });
+      expect(exitCode).toBe(0);
+      expect(result.status).toBe("passed");
+      expect(stdoutSpy).toHaveBeenCalled();
+    } finally {
+      stdoutSpy.mockRestore();
+      stderrSpy.mockRestore();
+    }
+  });
+
+  it("runs showcase in human mode with default stdout and stderr dependencies", async () => {
+    const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+
+    try {
+      const { exitCode, result } = await runShowcase({ mode: "fixture", format: "human" });
+      expect(exitCode).toBe(0);
+      expect(result.status).toBe("passed");
+      expect(stdoutSpy).toHaveBeenCalled();
+    } finally {
+      stdoutSpy.mockRestore();
+      stderrSpy.mockRestore();
+    }
+  });
+
+  it("returns exitCode 4 when simulationAggregate schema is invalid", async () => {
+    const stdoutWrites: string[] = [];
+    const { exitCode, result } = await runShowcase(
+      { mode: "fixture", format: "json" },
+      {
+        simulationAggregate: { invalid: true },
+        stdout: (s) => stdoutWrites.push(s),
+      },
+    );
+
+    expect(exitCode).toBe(4);
+    expect(result.status).toBe("incomplete");
+    expect(result.error?.code).toBe("SCHEMA_VALIDATION_ERROR");
+  });
+
+  it("renders VIOLATION NOT DETECTED badge in human mode when simulation violation is not caught", async () => {
+    const stdoutWrites: string[] = [];
+    const { sampleAggregateResponse } = await import("../../src/demo/fixtures/aggregate-response.js");
+    const { exitCode } = await runShowcase(
+      { mode: "fixture", format: "human" },
+      {
+        simulationAggregate: sampleAggregateResponse,
+        stdout: (s) => stdoutWrites.push(s),
+      },
+    );
+
+    expect(exitCode).toBe(1);
+    const combined = stdoutWrites.join("");
+    expect(combined).toContain("VIOLATION NOT DETECTED");
+  });
+
+  it("renders duplicates skipped notice in human mode when duplicates occur", async () => {
+    const { page1Fixture } = await import("../../src/demo/fixtures/github-pulls-pages.js");
+    const fetchImpl = vi.fn().mockImplementation(async (url: string) => {
+      const parsed = new URL(url);
+      const page = parsed.searchParams.get("page");
+      if (page === null || page === "1") {
+        return new Response(JSON.stringify(page1Fixture), {
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+            link: '<https://api.github.com/repos/appwrite/appwrite/pulls?state=open&per_page=100&page=2>; rel="next"',
+          },
+        });
+      }
+      return new Response(JSON.stringify(page1Fixture), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+
+    const stdoutWrites: string[] = [];
+    const { exitCode } = await runShowcase(
+      { mode: "fixture", format: "human" },
+      {
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        stdout: (s) => stdoutWrites.push(s),
+      },
+    );
+
+    expect(exitCode).toBe(0);
+    const combined = stdoutWrites.join("");
+    expect(combined).toContain("Duplicates Skipped");
+  });
 });
+
+describe("Presentation: detectRequestedOutput", () => {
+  it("defaults to format=human and mode=fixture when no arguments are provided", () => {
+    expect(detectRequestedOutput([])).toEqual({ format: "human", mode: "fixture" });
+    expect(detectRequestedOutput(["--unknown"])).toEqual({ format: "human", mode: "fixture" });
+  });
+
+  it("parses equal-separated options --format=json and --mode=live", () => {
+    expect(detectRequestedOutput(["--format=json"])).toEqual({ format: "json", mode: "fixture" });
+    expect(detectRequestedOutput(["--mode=live"])).toEqual({ format: "human", mode: "live" });
+    expect(detectRequestedOutput(["--mode=live", "--format=json"])).toEqual({ format: "json", mode: "live" });
+    expect(detectRequestedOutput(["--format=human", "--mode=fixture"])).toEqual({ format: "human", mode: "fixture" });
+  });
+
+  it("parses space-separated options --format json and --mode live", () => {
+    expect(detectRequestedOutput(["--format", "json"])).toEqual({ format: "json", mode: "fixture" });
+    expect(detectRequestedOutput(["--mode", "live"])).toEqual({ format: "human", mode: "live" });
+    expect(detectRequestedOutput(["--mode", "live", "--format", "json"])).toEqual({ format: "json", mode: "live" });
+    expect(detectRequestedOutput(["--format", "human", "--mode", "fixture"])).toEqual({ format: "human", mode: "fixture" });
+  });
+
+  it("ignores trailing flags without values or invalid flag values", () => {
+    expect(detectRequestedOutput(["--format"])).toEqual({ format: "human", mode: "fixture" });
+    expect(detectRequestedOutput(["--mode"])).toEqual({ format: "human", mode: "fixture" });
+    expect(detectRequestedOutput(["--format=yaml", "--mode=foo"])).toEqual({ format: "human", mode: "fixture" });
+  });
+});
+
+describe("Presentation: describeError", () => {
+  it("extracts error code, message, and page from QaChallengeError", () => {
+    const errorWithPage = new PaginationError("cycle detected", { page: 3 });
+    expect(describeError(errorWithPage)).toEqual({
+      code: "PAGINATION_ERROR",
+      message: "cycle detected",
+      page: 3,
+    });
+
+    const errorWithoutPage = new ConfigurationError("missing token");
+    expect(describeError(errorWithoutPage)).toEqual({
+      code: "CONFIGURATION_ERROR",
+      message: "missing token",
+    });
+  });
+
+  it("extracts name and message from standard Error instances", () => {
+    const typeError = new TypeError("null is not an object");
+    expect(describeError(typeError)).toEqual({
+      code: "TypeError",
+      message: "null is not an object",
+    });
+
+    const standardError = new Error("something went wrong");
+    expect(describeError(standardError)).toEqual({
+      code: "Error",
+      message: "something went wrong",
+    });
+  });
+
+  it("handles non-Error objects and primitive values gracefully", () => {
+    expect(describeError("string error")).toEqual({
+      code: "UNKNOWN_ERROR",
+      message: "string error",
+    });
+
+    expect(describeError({ code: 123 })).toEqual({
+      code: "UNKNOWN_ERROR",
+      message: "[object Object]",
+    });
+
+    expect(describeError(null)).toEqual({
+      code: "UNKNOWN_ERROR",
+      message: "null",
+    });
+  });
+});
+
+describe("Presentation: buildErrorResult", () => {
+  it("builds a fallback RunResult with default fields and null validation states", () => {
+    const errorDetails = { code: "CONFIGURATION_ERROR", message: "invalid flag" };
+    const result = buildErrorResult({
+      mode: "fixture",
+      error: errorDetails,
+      observedFrom: "2026-09-30T00:00:00.000Z",
+      observedTo: "2026-09-30T00:00:00.010Z",
+      durationMs: 10,
+    });
+
+    expect(result.contractVersion).toBe("1.1");
+    expect(result.mode).toBe("fixture");
+    expect(result.status).toBe("incomplete");
+    expect(result.error).toEqual(errorDetails);
+    expect(result.source.fixtureName).toBe("multi-page-deterministic-fixture");
+    expect(result.collection.pagesFetched).toBe(0);
+    expect(result.collection.recordsReceived).toBe(0);
+    expect(result.collection.paginationComplete).toBe(false);
+    expect(result.validation.schemaValid).toBeNull();
+    expect(result.validation.aggregateValid).toBeNull();
+    expect(result.validation.violations).toEqual([]);
+    expect(result.durationMs).toBe(10);
+  });
+
+  it("builds a fallback RunResult preserving partial collection metrics", () => {
+    const errorDetails = { code: "HTTP_ERROR", message: "500 Internal Error", page: 3 };
+    const result = buildErrorResult({
+      mode: "live",
+      error: errorDetails,
+      observedFrom: "2026-09-30T00:00:00.000Z",
+      observedTo: "2026-09-30T00:00:00.050Z",
+      durationMs: 50,
+      partial: {
+        pagesFetched: 2,
+        recordsReceived: 200,
+        duplicatesSkipped: 1,
+        draftRecords: 10,
+        openNonDraftRecords: 190,
+        paginationComplete: false,
+        schemaValid: true,
+      },
+    });
+
+    expect(result.mode).toBe("live");
+    expect(result.source.fixtureName).toBeUndefined();
+    expect(result.collection.pagesFetched).toBe(2);
+    expect(result.collection.recordsReceived).toBe(200);
+    expect(result.collection.duplicatesSkipped).toBe(1);
+    expect(result.collection.draftRecords).toBe(10);
+    expect(result.collection.openNonDraftRecords).toBe(190);
+    expect(result.collection.paginationComplete).toBe(false);
+    expect(result.validation.schemaValid).toBe(true);
+    expect(result.validation.aggregateValid).toBeNull();
+  });
+});
+
