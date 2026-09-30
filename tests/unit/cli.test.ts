@@ -69,6 +69,7 @@ describe("Presentation: CLI exit codes and error mapping", () => {
     expect(result.status).toBe("incomplete");
     expect(result.error?.code).toBe("CONFIGURATION_ERROR");
     expect(result.validation.schemaValid).toBeNull();
+    expect(result.validation.aggregateValid).toBeNull();
     const combined = stdoutWrites.join("");
     expect(() => JSON.parse(combined)).not.toThrow();
   });
@@ -89,6 +90,7 @@ describe("Presentation: CLI exit codes and error mapping", () => {
     expect(result.status).toBe("incomplete");
     expect(result.error?.code).toBe("TRANSPORT_ERROR");
     expect(result.validation.schemaValid).toBeNull();
+    expect(result.validation.aggregateValid).toBeNull();
     expect(result.collection.paginationComplete).toBe(false);
     expect(result.collection.recordsReceived).toBe(0);
   });
@@ -113,6 +115,7 @@ describe("Presentation: CLI exit codes and error mapping", () => {
     expect(result.status).toBe("incomplete");
     expect(result.error?.code).toBe("SCHEMA_VALIDATION_ERROR");
     expect(result.validation.schemaValid).toBe(false);
+    expect(result.validation.aggregateValid).toBeNull();
   });
 
   it("returns exitCode 4 and preserves Part 1 metrics when Part 2 schema is invalid", async () => {
@@ -129,6 +132,7 @@ describe("Presentation: CLI exit codes and error mapping", () => {
     expect(result.status).toBe("incomplete");
     expect(result.error?.code).toBe("SCHEMA_VALIDATION_ERROR");
     expect(result.validation.schemaValid).toBe(false);
+    expect(result.validation.aggregateValid).toBeNull();
     expect(result.collection.pagesFetched).toBe(3);
     expect(result.collection.recordsReceived).toBe(6);
     expect(result.collection.openNonDraftRecords).toBe(4);

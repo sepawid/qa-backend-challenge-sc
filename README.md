@@ -195,7 +195,7 @@ npm run demo:json
 }
 ```
 
-In failure scenarios, structured error details conforming to the same `RunResult` contract are emitted:
+In failure scenarios, structured error details conforming to the same `RunResult` contract are emitted. Notice that both `schemaValid` and `aggregateValid` are tri-state (`boolean | null`) — when execution fails before Part 2 aggregate business rules can be evaluated, `aggregateValid` is `null` (avoiding false implication that rules were evaluated and failed):
 
 ```json
 {
@@ -223,7 +223,7 @@ In failure scenarios, structured error details conforming to the same `RunResult
   },
   "validation": {
     "schemaValid": null,
-    "aggregateValid": false,
+    "aggregateValid": null,
     "violations": []
   },
   "durationMs": 12,

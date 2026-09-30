@@ -187,7 +187,7 @@ export function buildErrorResult(params: BuildErrorResultParams): RunResult {
     openNonDraftRecords: partial.openNonDraftRecords ?? 0,
     paginationComplete: partial.paginationComplete ?? false,
     schemaValid: partial.schemaValid ?? null,
-    aggregateValid: partial.aggregateValid ?? false,
+    aggregateValid: partial.aggregateValid ?? null,
     violations: [],
     durationMs: params.durationMs,
   });

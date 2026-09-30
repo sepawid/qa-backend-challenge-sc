@@ -39,4 +39,31 @@ describe("Presentation: presentation-model", () => {
     expect(result.validation.violations).toEqual([]);
     expect(result.limitations).toEqual(KNOWN_LIMITATIONS);
   });
+
+  it("supports tri-state aggregateValid and schemaValid (null) on incomplete runs", () => {
+    const result = buildRunResult({
+      mode: "live",
+      status: "incomplete",
+      observedFrom: "2024-01-01T00:00:00Z",
+      observedTo: "2024-01-01T00:00:01Z",
+      pagesFetched: 0,
+      recordsReceived: 0,
+      draftRecords: 0,
+      openNonDraftRecords: 0,
+      paginationComplete: false,
+      schemaValid: null,
+      aggregateValid: null,
+      error: {
+        code: "TRANSPORT_ERROR",
+        message: "Network failure",
+      },
+      durationMs: 50,
+    });
+
+    expect(result.status).toBe("incomplete");
+    expect(result.validation.schemaValid).toBeNull();
+    expect(result.validation.aggregateValid).toBeNull();
+    expect(result.error?.code).toBe("TRANSPORT_ERROR");
+  });
 });
+

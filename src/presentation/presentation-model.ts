@@ -30,7 +30,7 @@ export interface RunErrorDetails {
 
 export interface ValidationSummary {
   readonly schemaValid: boolean | null;
-  readonly aggregateValid: boolean;
+  readonly aggregateValid: boolean | null;
   readonly violations: readonly AggregateViolation[];
   readonly simulation?: SimulationResult | undefined;
 }
@@ -67,7 +67,7 @@ export function buildRunResult(params: {
   openNonDraftRecords: number;
   paginationComplete: boolean;
   schemaValid: boolean | null;
-  aggregateValid: boolean;
+  aggregateValid: boolean | null;
   violations?: readonly AggregateViolation[] | undefined;
   simulation?: SimulationResult | undefined;
   error?: RunErrorDetails | undefined;
