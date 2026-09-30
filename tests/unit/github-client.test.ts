@@ -204,4 +204,31 @@ describe("Core: GitHubPullRequestClient", () => {
     expect(transportErr.message).toContain("aborted");
     expect(transportErr.context.page).toBe(1);
   });
+
+  it("handles malformed rate limit headers resiliently without throwing RangeError", async () => {
+    const { page1Fixture } = await import("../../src/demo/fixtures/github-pulls-pages.js");
+    const mockFetch = vi.fn().mockImplementation(async () => {
+      return new Response(JSON.stringify(page1Fixture), {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          "x-ratelimit-remaining": "NaN",
+          "x-ratelimit-reset": "99999999999999999", // Way beyond valid year range
+          "x-ratelimit-limit": "Infinity",
+        },
+      });
+    });
+
+    const client = new GitHubPullRequestClient({
+      fetchImpl: mockFetch as unknown as typeof fetch,
+    });
+
+    const result = await client.fetchAllOpenPullRequests();
+    expect(result.pullRequests).toHaveLength(2);
+    expect(result.rateLimit).toBeUndefined();
+    expect(result.recordsReceived).toBe(2);
+    expect(result.uniqueRecords).toBe(2);
+    expect(result.duplicatesSkipped).toBe(0);
+    expect(result.recordsReceived).toBe(result.uniqueRecords + result.duplicatesSkipped);
+  });
 });

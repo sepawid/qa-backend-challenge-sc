@@ -1,5 +1,12 @@
 import type { GitHubPullRequest } from "../../schemas/github-pull.schema.js";
 
+const appwriteBaseRepo = {
+  repo: {
+    id: 180190854,
+    full_name: "appwrite/appwrite",
+  },
+};
+
 /**
  * Multi-page GitHub Pull Requests fixture representing a deterministic 3-page response dataset.
  * Total records: 6 (4 open non-draft, 2 open draft).
@@ -14,6 +21,7 @@ export const page1Fixture: GitHubPullRequest[] = [
     html_url: "https://github.com/appwrite/appwrite/pull/1",
     created_at: "2024-01-10T10:00:00Z",
     labels: [{ name: "feature" }],
+    base: appwriteBaseRepo,
   },
   {
     id: 102,
@@ -24,6 +32,7 @@ export const page1Fixture: GitHubPullRequest[] = [
     html_url: "https://github.com/appwrite/appwrite/pull/2",
     created_at: "2024-01-11T12:00:00Z",
     labels: [{ name: "wip" }],
+    base: appwriteBaseRepo,
   },
 ];
 
@@ -37,6 +46,7 @@ export const page2Fixture: GitHubPullRequest[] = [
     html_url: "https://github.com/appwrite/appwrite/pull/3",
     created_at: "2024-01-12T14:30:00Z",
     labels: [{ name: "bug" }, { name: "high-priority" }],
+    base: appwriteBaseRepo,
   },
   {
     id: 104,
@@ -47,6 +57,7 @@ export const page2Fixture: GitHubPullRequest[] = [
     html_url: "https://github.com/appwrite/appwrite/pull/4",
     created_at: "2024-01-13T09:15:00Z",
     labels: [{ name: "documentation" }],
+    base: appwriteBaseRepo,
   },
 ];
 
@@ -60,6 +71,7 @@ export const page3Fixture: GitHubPullRequest[] = [
     html_url: "https://github.com/appwrite/appwrite/pull/5",
     created_at: "2024-01-14T16:45:00Z",
     labels: [{ name: "experimental" }],
+    base: appwriteBaseRepo,
   },
   {
     id: 106,
@@ -70,6 +82,7 @@ export const page3Fixture: GitHubPullRequest[] = [
     html_url: "https://github.com/appwrite/appwrite/pull/6",
     created_at: "2024-01-15T11:20:00Z",
     labels: [{ name: "refactor" }],
+    base: appwriteBaseRepo,
   },
 ];
 

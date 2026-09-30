@@ -76,7 +76,7 @@ npm run test:live
          ▼                                                 ▼
 [ Automated Tests (Vitest) ]              [ CLI Showcase Runner (tsx/node) ]
 • 100% offline unit/integration           • Formatted progress & latency
-• Opt-in live verification + oracle       • Machine-readable JSON contract 1.1
+• Opt-in live verification + oracle       • Machine-readable JSON contract 1.2
 ```
 
 ### Dependency Rules:
@@ -94,17 +94,19 @@ npm run test:live
 | **Fetch every open PR across all pages** | `GitHubPullRequestClient.fetchAllOpenPullRequests` | `tests/integration/github-pagination.test.ts` (multi-page sequence) |
 | **Do not assume single page** | Exhaustive `rel="next"` pagination loop | `tests/integration/github-pagination.test.ts` |
 | **Validate API response structure** | `githubPullRequestPageSchema` (Zod) on each page | `tests/unit/github-client.test.ts` (malformed schema tests) |
-| **Count strictly open non-draft PRs** | `countOpenNonDraftPullRequests` in `pull-request-monitor.ts` | `tests/unit/pull-request-monitor.test.ts` (state/draft matrix) |
+| **Count strictly open non-draft PRs** | `countOpenNonDraftPullRequests` in `pull-request-monitor.ts` | `tests/unit/pull-request-monitor.test.ts` (state/draft matrix, historical dump) |
 | **Part 2: Total open PRs integrity** | `validateAggregateRules` checking `length === total_open_prs` | `tests/unit/aggregate-rules.test.ts` (`PR_COUNT_MISMATCH` test) |
 | **Part 2: High-priority draft rule** | Exact check: `labels.includes("high-priority") && is_draft` | `tests/unit/aggregate-rules.test.ts` (`HIGH_PRIORITY_PR_IS_DRAFT` test) |
 | **Clear CI error observability** | Structured typed violations (`AggregateViolation`) & error formatting | `tests/unit/aggregate-rules.test.ts`, demonstrated via `npm start` |
-| **RFC 8288 Ambiguous link handling** | `resolveNextLink` returning `kind: "ambiguous"` on multiple targets | `tests/unit/link-header.test.ts`, `tests/integration/github-pagination.test.ts` |
-| **Live data stability & deduplication** | `sort=created&direction=asc`, cross-page deduplication, repo pinning | `tests/integration/github-pagination.test.ts` |
-| **Independent Live Search Oracle** | Cross-checking count against GitHub Search API with tolerance | `tests/live/github-pulls.live.test.ts` |
-| **Part 2 matching assumptions** | Documented exact label match and array length semantics | `tests/unit/aggregate-rules.test.ts` |
-| **Structured exit codes & error mapping** | `mapErrorToExitCode` and typed errors (`ConfigurationError`, etc.) | `tests/unit/cli.test.ts`, `tests/unit/config.test.ts` |
-| **Controlled simulation enforcement** | Verifying `HIGH_PRIORITY_PR_IS_DRAFT` detection in showcase | `tests/unit/cli.test.ts`, `tests/unit/presentation-model.test.ts` |
-| **Deterministic test isolation** | Offline scripted fake transport | `npm test` runs 100% offline without network dependencies |
+| **RFC 8288 Link parser compliance** | `resolveNextLink` enforcing first `rel`, quoted-pairs, malformed syntax detection, and anchor scoping | `tests/unit/link-header.test.ts` |
+| **Pagination semantic invariants** | Strict validation of `state=open`, `per_page=100`, `sort=created`, `direction=asc` & duplicate params | `tests/integration/github-pagination.test.ts` |
+| **Numeric repository ID binding** | Authoritative pinning to base repository (`pr.base.repo.id`) | `tests/integration/github-pagination.test.ts` |
+| **Transport vs Schema Separation** | Body stream aborts throw `TransportError`; invalid JSON/wire throws `SchemaValidationError` | `tests/integration/transport-body-abort.test.ts` |
+| **Preservation of Stage Results** | Canonical aggregate validation preserved even if simulation aggregate payload fails schema | `tests/unit/cli.test.ts` |
+| **Search Oracle Rate-Limit & Metadata** | Distinguishes primary/secondary rate-limits from non-rate-limit 403; checks `incomplete_results` | `tests/live/github-pulls.live.test.ts` |
+| **Rate-Limit Diagnostics Resilience** | Safe parsing of timestamps preventing `RangeError`/`NaN` crashes | `tests/unit/github-client.test.ts` |
+| **Environment Isolation in E2E** | Subprocesses executed with sanitized env stripping hostile `GITHUB_*` and `LIVE_TOLERANCE` | `tests/integration/cli-e2e.test.ts` |
+| **Deterministic test isolation** | Offline scripted fake transport & real local HTTP server | `npm test` runs 100% offline without external network dependencies |
 
 ---
 
@@ -112,24 +114,34 @@ npm run test:live
 
 1. **Authoritative RFC 8288 Pagination (`rel="next"`)**:
    - The client parses the HTTP `Link` header using `resolveNextLink` (`src/core/link-header.ts`).
-   - If multiple distinct `rel="next"` targets appear in the header, it classifies the state as ambiguous and throws `PaginationError`. Duplicate identical URLs are safely normalized.
-   - Pagination ceases cleanly when `rel="next"` is absent.
-2. **Ascending Order (`sort=created&direction=asc`)**:
-   - Initial pagination requests specify ascending creation order so newly created pull requests are appended to later pages rather than shifting page offsets backwards during retrieval.
-3. **Cross-Page Deduplication & Intra-Page Integrity**:
-   - If a duplicate pull request ID occurs within the **same page**, it is treated as an upstream API defect and throws `PaginationError`.
-   - If a pull request shifts across page boundaries during multi-page pagination, it is safely deduplicated and counted in `duplicatesSkipped`.
-4. **Repository Pinning**:
-   - Subsequent `rel="next"` URLs formatted as `/repositories/<id>/pulls` are pinned to the initial repository ID. Any mismatch throws `PaginationError`.
-5. **SSRF & Credential Protection**:
-   - Before requesting any next page, the client validates that the target URL protocol is `https:`, the origin matches `https://api.github.com`, and no embedded credentials exist.
-   - Redirects are set to `redirect: manual`. Any `3xx` response is rejected immediately to prevent credential leaks to external hosts.
-6. **Loop & Cycle Detection**:
+   - **RFC 8288 §3.3 Relation Parameter**: The first `rel` parameter takes precedence. Subsequent `rel` parameters in the same link are ignored.
+   - **RFC 8288 App B.4 Quoted-Pairs**: Quoted-pairs (e.g. `rel="ne\xt"`) are decoded to `next`.
+   - **RFC 8288 §3.1–§3.2 Anchor Context**: Links targeting a foreign `anchor` context (different from the current representation URL) are filtered out, avoiding false ambiguity.
+   - **Syntax Validation**: Malformed link headers (unclosed `<...>` or quotes) return `{ kind: "malformed" }` and throw `PaginationError` (exit code 5), preventing silent truncation.
+   - **Ambiguity Detection**: Multiple distinct valid `rel="next"` targets raise `PaginationError`. Duplicate identical URLs are safely normalized.
+   - Relative URLs (e.g. `</repos/owner/repo/pulls?page=2>`) are resolved against `currentUrl` via `new URL(target, currentUrl)`.
+2. **Pagination Query Parameter Semantic Invariants**:
+   - Any `rel="next"` URL must strictly preserve `state=open`, `per_page=100`, `sort=created`, and `direction=asc`.
+   - Links with missing invariants or contradictory duplicate keys (e.g. `?page=2&page=3`) are rejected with `PaginationError`.
+3. **Repository Identity & Base Repository Pinning**:
+   - The expected target repository is established from the initial endpoint (`/repos/:owner/:repo/pulls`).
+   - The numeric repository ID is extracted and pinned from the base repository (`pr.base.repo.id` and `pr.base.repo.full_name`), not head/fork.
+   - Numeric links (`/repositories/:id/pulls`) are rejected unless the identity is confirmed and matches the pinned ID.
+4. **Transport Body Read vs Schema Validation Separation**:
+   - Reading the HTTP response body (`response.text()`) is isolated. Network aborts, timeouts, or severed sockets throw `TransportError` (exit code 3), preserving the underlying cause.
+   - Completed bodies with syntax errors or schema mismatches throw `SchemaValidationError` (exit code 4).
+5. **Cross-Page Deduplication & Intra-Page Integrity**:
+   - Duplicate IDs within the same page are treated as an upstream API defect and throw `PaginationError`.
+   - Shifted records across page boundaries are safely deduplicated.
+   - Metrics guarantee: `recordsReceived = uniqueRecords + duplicatesSkipped`.
+6. **SSRF & Credential Protection**:
+   - Pagination URLs require `https:` (loopback `127.0.0.1`/`localhost` permitted for local tests), trusted origin matching, and no embedded credentials or URL fragments.
+   - Redirects are set to `redirect: manual`. Any `3xx` response is rejected immediately to protect credentials.
+7. **Loop & Cycle Detection**:
    - Maintains a set of visited URLs. Encountering a previously visited pagination URL immediately raises `PaginationError`.
-7. **Safety Limits, Timeouts & Diagnostic HTTP Errors**:
-   - Enforces a safety limit cap (`GITHUB_MAX_PAGES`, default: 20).
-   - Requests use `AbortSignal.timeout(timeoutMs)` (`GITHUB_TIMEOUT_MS`, default: 10,000ms).
-   - `HttpError` includes HTTP status, status text, the first ~200 characters of the response body, and the rate-limit reset timestamp when available.
+8. **Safety Limits, Timeouts & Diagnostic HTTP Errors**:
+   - Enforces safety limit caps (`GITHUB_MAX_PAGES`, default: 20) and timeout controls (`GITHUB_TIMEOUT_MS`, default: 10,000ms).
+   - Rate-limit headers are parsed safely to prevent `RangeError` / `NaN` exceptions from malformed reset timestamps.
 
 ---
 
@@ -155,27 +167,35 @@ npm run test:live
 
 ## CI/CD Exit Codes & Machine-Readable Output
 
-When running `--format=json`, the CLI emits clean, versioned JSON (Contract 1.1) to `stdout`:
+When running with `--format=json`, the CLI emits clean, versioned JSON (Contract 1.2) directly to `stdout`.
 
-```bash
-npm run demo:json
-```
+> [!TIP]
+> **Clean Machine-Readable Execution**:
+> To guarantee clean stdout without npm lifecycle banners or diagnostic logs, use either:
+> ```bash
+> # Option A: Silent npm script
+> npm run demo:json --silent
+>
+> # Option B: Direct compiled Node process (recommended for CI pipelines)
+> node dist/presentation/main.js --format=json
+> ```
 
 ```json
 {
-  "contractVersion": "1.1",
+  "contractVersion": "1.2",
   "mode": "fixture",
   "status": "passed",
   "source": {
     "provider": "github",
     "repository": "appwrite/appwrite",
-    "observedFrom": "2026-09-29T17:06:59.319Z",
-    "observedTo": "2026-09-29T17:06:59.338Z",
+    "observedFrom": "2026-09-30T12:12:49.183Z",
+    "observedTo": "2026-09-30T12:12:49.201Z",
     "fixtureName": "multi-page-deterministic-fixture"
   },
   "collection": {
     "pagesFetched": 3,
     "recordsReceived": 6,
+    "uniqueRecords": 6,
     "duplicatesSkipped": 0,
     "draftRecords": 2,
     "openNonDraftRecords": 4,
@@ -190,16 +210,24 @@ npm run demo:json
       "detected": true
     }
   },
-  "durationMs": 19,
-  "limitations": [ ... ]
+  "durationMs": 18,
+  "limitations": [
+    "GitHub REST API does not provide atomic multi-page repository snapshots.",
+    "Pull requests can be opened, closed, or shifted across pages during live collection.",
+    "Rate limits for unauthenticated GitHub API requests are capped at 60 requests per hour.",
+    "Part 1 live results and Part 2 middleware aggregate represent decoupled systems."
+  ]
 }
 ```
 
-In failure scenarios, structured error details conforming to the same `RunResult` contract are emitted. Notice that both `schemaValid` and `aggregateValid` are tri-state (`boolean | null`) — when execution fails before Part 2 aggregate business rules can be evaluated, `aggregateValid` is `null` (avoiding false implication that rules were evaluated and failed):
+In failure scenarios, structured error details conforming to the same `RunResult` contract are emitted. Notice that:
+- `aggregateValid` and `schemaValid` are tri-state (`boolean | null`). When execution fails before Part 2 aggregate business rules can be evaluated, `aggregateValid` remains `null`.
+- If Part 2 canonical validation succeeds, but the controlled simulation aggregate fails schema validation, canonical `aggregateValid: true` is preserved, and `schemaValid` reflects `false`.
+- Partial collection metrics (`pagesFetched`, `recordsReceived`, `uniqueRecords`, `duplicatesSkipped`) are preserved even if a later page encounters an error:
 
 ```json
 {
-  "contractVersion": "1.1",
+  "contractVersion": "1.2",
   "mode": "live",
   "status": "incomplete",
   "error": {
@@ -216,9 +244,10 @@ In failure scenarios, structured error details conforming to the same `RunResult
   "collection": {
     "pagesFetched": 2,
     "recordsReceived": 200,
+    "uniqueRecords": 200,
     "duplicatesSkipped": 0,
-    "draftRecords": 0,
-    "openNonDraftRecords": 0,
+    "draftRecords": 12,
+    "openNonDraftRecords": 188,
     "paginationComplete": false
   },
   "validation": {
@@ -237,9 +266,9 @@ In failure scenarios, structured error details conforming to the same `RunResult
 | `0` | Success | All tasks succeeded: Part 1 completed pagination, Part 2 canonical aggregate passed, and simulation caught expected violation. |
 | `1` | Business Rule Violation / QA Failure | Canonical aggregate rule violation (`PR_COUNT_MISMATCH` or `HIGH_PRIORITY_PR_IS_DRAFT`), or failure to detect simulation violation. |
 | `2` | Configuration Error | Invalid environment variable values (`GITHUB_TOKEN`, `GITHUB_TIMEOUT_MS`, `GITHUB_MAX_PAGES`, `LIVE_TOLERANCE`) or invalid CLI options. |
-| `3` | Transport / HTTP Error | Network socket failure, request timeout, HTTP 4xx/5xx responses, or unauthenticated rate limit exhaustion. |
-| `4` | Schema Validation Error | Wire-schema validation failed (Zod parsing error on GitHub PR page or aggregate response). |
-| `5` | Pagination Anomaly | RFC 8288 ambiguous `rel="next"` links, pagination loop detected, repository mismatch, or intra-page duplicate IDs. |
+| `3` | Transport / HTTP Error | Network socket failure, body stream abort/timeout, HTTP 4xx/5xx responses, or unauthenticated rate limit exhaustion. |
+| `4` | Schema Validation Error | Wire-schema validation failed (Zod parsing error on GitHub PR page or aggregate response) or malformed non-JSON body. |
+| `5` | Pagination Anomaly | RFC 8288 ambiguous or malformed `rel="next"` links, query parameter invariant violations, loop detected, repo ID mismatch, or intra-page duplicate IDs. |
 | `6` | Unexpected Error | Unhandled internal exception (e.g. `TypeError`, system failure) distinct from domain/challenge assertions. |
 
 ---

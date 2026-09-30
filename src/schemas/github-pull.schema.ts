@@ -16,6 +16,17 @@ export const githubPullRequestSchema = z
         })
         .passthrough(),
     ),
+    base: z
+      .object({
+        repo: z
+          .object({
+            id: z.number().int().positive(),
+            full_name: z.string().optional(),
+          })
+          .passthrough(),
+      })
+      .passthrough()
+      .optional(),
   })
   .passthrough();
 

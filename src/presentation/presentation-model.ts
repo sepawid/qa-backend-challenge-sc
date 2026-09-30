@@ -11,6 +11,7 @@ export interface PresentationSource {
 export interface CollectionMetrics {
   readonly pagesFetched: number;
   readonly recordsReceived: number;
+  readonly uniqueRecords: number;
   readonly duplicatesSkipped: number;
   readonly draftRecords: number;
   readonly openNonDraftRecords: number;
@@ -36,7 +37,7 @@ export interface ValidationSummary {
 }
 
 export interface RunResult {
-  readonly contractVersion: "1.1";
+  readonly contractVersion: "1.2";
   readonly mode: "fixture" | "live";
   readonly status: "passed" | "failed" | "incomplete";
   readonly error?: RunErrorDetails | undefined;
@@ -62,6 +63,7 @@ export function buildRunResult(params: {
   fixtureName?: string | undefined;
   pagesFetched: number;
   recordsReceived: number;
+  uniqueRecords: number;
   duplicatesSkipped?: number | undefined;
   draftRecords: number;
   openNonDraftRecords: number;
@@ -75,7 +77,7 @@ export function buildRunResult(params: {
   limitations?: readonly string[] | undefined;
 }): RunResult {
   return {
-    contractVersion: "1.1",
+    contractVersion: "1.2",
     mode: params.mode,
     status: params.status,
     ...(params.error !== undefined ? { error: params.error } : {}),
@@ -89,6 +91,7 @@ export function buildRunResult(params: {
     collection: {
       pagesFetched: params.pagesFetched,
       recordsReceived: params.recordsReceived,
+      uniqueRecords: params.uniqueRecords,
       duplicatesSkipped: params.duplicatesSkipped ?? 0,
       draftRecords: params.draftRecords,
       openNonDraftRecords: params.openNonDraftRecords,

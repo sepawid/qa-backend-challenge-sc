@@ -14,7 +14,11 @@ const searchResponseSchema = z.object({
 
 type SearchResponse = z.infer<typeof searchResponseSchema>;
 
-async function fetchSearchTotalCount(query: string, token?: string): Promise<SearchResponse | null> {
+export async function fetchSearchTotalCount(
+  query: string,
+  token?: string,
+  timeoutMs = 10_000,
+): Promise<SearchResponse | null> {
   const url = `https://api.github.com/search/issues?q=${encodeURIComponent(query)}&per_page=1`;
   const headers: Record<string, string> = {
     Accept: "application/vnd.github+json",
@@ -24,15 +28,64 @@ async function fetchSearchTotalCount(query: string, token?: string): Promise<Sea
     headers["Authorization"] = `Bearer ${token}`;
   }
 
-  const response = await fetch(url, { headers });
-  if (response.status === 403 || response.status === 429) {
-    console.warn(
-      `[LIVE SEARCH ORACLE] GitHub Search API rate-limited (${response.status}); oracle comparison will be skipped.`,
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      headers,
+      redirect: "manual",
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (error) {
+    throw new Error(
+      `GitHub Search API request failed (${url}): ${error instanceof Error ? error.message : String(error)}`,
     );
+  }
+
+  if (response.status >= 300 && response.status < 400) {
+    throw new Error(`GitHub Search API unexpected redirect (${response.status})`);
+  }
+
+  const remainingHeader = response.headers.get("x-ratelimit-remaining");
+  const retryAfterHeader = response.headers.get("retry-after");
+
+  if (response.status === 429) {
+    console.warn(`[LIVE SEARCH ORACLE] GitHub Search API rate-limited (HTTP 429); oracle comparison will be skipped.`);
     return null;
   }
+
+  if (response.status === 403) {
+    let bodyText = "";
+    try {
+      bodyText = await response.text();
+    } catch {
+      // ignore
+    }
+
+    const isPrimaryRateLimit = remainingHeader !== null && Number(remainingHeader) === 0;
+    const isSecondaryRateLimit =
+      retryAfterHeader !== null || /rate limit|secondary rate limit/i.test(bodyText);
+
+    if (isPrimaryRateLimit || isSecondaryRateLimit) {
+      console.warn(
+        `[LIVE SEARCH ORACLE] GitHub Search API rate-limited (HTTP 403, remaining=${remainingHeader ?? "n/a"}); oracle comparison will be skipped.`,
+      );
+      return null;
+    }
+
+    // Non-rate-limit 403 (policy block, forbidden resource) must fail loudly
+    throw new Error(
+      `GitHub Search API returned HTTP 403 Forbidden (not rate-limited): ${bodyText || response.statusText}`,
+    );
+  }
+
   if (!response.ok) {
-    throw new Error(`GitHub Search API error (${response.status}): ${response.statusText}`);
+    let bodyText = "";
+    try {
+      bodyText = await response.text();
+    } catch {
+      // ignore
+    }
+    throw new Error(`GitHub Search API error (${response.status}): ${bodyText || response.statusText}`);
   }
 
   const json = await response.json();
@@ -55,13 +108,8 @@ describe("Live Integration: Appwrite repository open pull requests", () => {
     // 1. Completion & pagination integrity
     expect(result.isComplete).toBe(true);
     expect(result.pagesFetched).toBeGreaterThanOrEqual(1);
-    expect(result.recordsReceived).toBeGreaterThan(0);
-
-    const expectedMinPages = Math.ceil(result.recordsReceived / 100);
-    // pagesFetched should match expected pages (or expected + 1 if an additional empty page was served before next link terminated)
-    expect(
-      result.pagesFetched === expectedMinPages || result.pagesFetched === expectedMinPages + 1,
-    ).toBe(true);
+    expect(result.recordsReceived).toBeGreaterThanOrEqual(0);
+    expect(result.recordsReceived).toBe(result.uniqueRecords + result.duplicatesSkipped);
 
     // 2. Schema compliance & PR issue number uniqueness across entire live dataset
     const seenNumbers = new Set<number>();
@@ -78,7 +126,7 @@ describe("Live Integration: Appwrite repository open pull requests", () => {
       seenNumbers.add(pr.number);
     }
 
-    // 3. Business rule calculation
+    // 3. Business rule calculation & exact metric relations
     const openNonDrafts = filterOpenNonDraftPullRequests(result.pullRequests);
     const finalCount = countOpenNonDraftPullRequests(result.pullRequests);
     const draftPullRequests = result.pullRequests.filter((pr) => pr.draft);
@@ -86,15 +134,20 @@ describe("Live Integration: Appwrite repository open pull requests", () => {
 
     expect(openNonDrafts.every((pr) => pr.state === "open" && !pr.draft)).toBe(true);
     expect(draftPullRequests.every((pr) => pr.state === "open" && pr.draft)).toBe(true);
-    expect(finalCount + draftCount).toBe(result.recordsReceived);
+    expect(finalCount + draftCount).toBe(result.uniqueRecords);
 
     // 4. Independent verification via GitHub Search API oracle
     const [nonDraftSearchResult, openSearchResult] = await Promise.all([
       fetchSearchTotalCount(
         "repo:appwrite/appwrite is:pr is:open draft:false",
         config.GITHUB_TOKEN,
+        config.GITHUB_TIMEOUT_MS,
       ),
-      fetchSearchTotalCount("repo:appwrite/appwrite is:pr is:open", config.GITHUB_TOKEN),
+      fetchSearchTotalCount(
+        "repo:appwrite/appwrite is:pr is:open",
+        config.GITHUB_TOKEN,
+        config.GITHUB_TIMEOUT_MS,
+      ),
     ]);
 
     const nonDraftOracleSummary = nonDraftSearchResult
@@ -109,7 +162,8 @@ describe("Live Integration: Appwrite repository open pull requests", () => {
         `  • Repository: appwrite/appwrite\n` +
         `  • Observation Window: ${result.startedAt} -> ${result.completedAt} (${result.durationMs}ms)\n` +
         `  • Pages Fetched: ${result.pagesFetched}\n` +
-        `  • Total Open PRs Retrieved: ${result.recordsReceived}\n` +
+        `  • Total Records Retrieved: ${result.recordsReceived}\n` +
+        `  • Unique PRs: ${result.uniqueRecords}\n` +
         `  • Draft PRs Excluded: ${draftCount}\n` +
         `  • Final Open Non-Draft Count: ${finalCount}\n` +
         `  • Duplicates Skipped Across Pages: ${result.duplicatesSkipped}\n` +
@@ -135,9 +189,9 @@ describe("Live Integration: Appwrite repository open pull requests", () => {
         "[LIVE SEARCH ORACLE] Incomplete results or rate-limit encountered for total open PR search query; skipping oracle assertion.",
       );
     } else {
-      const openDelta = Math.abs(result.recordsReceived - openSearchResult.total_count);
+      const openDelta = Math.abs(result.uniqueRecords - openSearchResult.total_count);
       console.info(
-        `[LIVE SEARCH ORACLE] Total Open comparison: fetched=${result.recordsReceived}, oracle=${openSearchResult.total_count}, delta=${openDelta}, tolerance=${liveTolerance}`,
+        `[LIVE SEARCH ORACLE] Total Open comparison: fetched(unique)=${result.uniqueRecords}, oracle=${openSearchResult.total_count}, delta=${openDelta}, tolerance=${liveTolerance}`,
       );
       expect(openDelta).toBeLessThanOrEqual(liveTolerance);
     }

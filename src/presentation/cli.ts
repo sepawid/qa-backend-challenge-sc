@@ -1,99 +1,131 @@
-import { parseArgs } from "node:util";
-import { GitHubPullRequestClient } from "../core/github-client.js";
-import { countOpenNonDraftPullRequests } from "../business/pull-request-monitor.js";
-import { aggregateResponseSchema } from "../schemas/aggregate.schema.js";
-import { validateAggregateRules } from "../business/aggregate-rules.js";
 import {
-  QaChallengeError,
-  ConfigurationError,
-  TransportError,
-  HttpError,
-  SchemaValidationError,
-  PaginationError,
-} from "../core/errors.js";
-import { createFixtureFetch } from "../demo/fixture-fetch.js";
+  GitHubPullRequestClient,
+  type GitHubClientOptions,
+} from "../core/github-client.js";
+import {
+  countOpenNonDraftPullRequests,
+} from "../business/pull-request-monitor.js";
+import {
+  validateAggregateRules,
+  AggregateRuleError,
+} from "../business/aggregate-rules.js";
+import {
+  aggregateResponseSchema,
+  type AggregateResponse,
+} from "../schemas/aggregate.schema.js";
+import {
+  createFixtureFetch,
+} from "../demo/fixture-fetch.js";
 import { sampleAggregateResponse } from "../demo/fixtures/aggregate-response.js";
 import { aggregateHighPriorityDraftFixture } from "../demo/fixtures/aggregate-high-priority-draft.js";
+import { parseEnvironmentConfig } from "../schemas/config.schema.js";
+import {
+  ConfigurationError,
+  HttpError,
+  PaginationError,
+  QaChallengeError,
+  SchemaValidationError,
+  TransportError,
+} from "../core/errors.js";
 import {
   buildRunResult,
-  type RunResult,
   type RunErrorDetails,
+  type RunResult,
 } from "./presentation-model.js";
+import type { AggregateViolation } from "../business/aggregate-rules.js";
 import { TerminalFormatter } from "./formatter.js";
-import {
-  cliOptionsSchema,
-  parseEnvironmentConfig,
-} from "../schemas/config.schema.js";
 
 export interface CliArguments {
-  mode: "fixture" | "live";
-  format: "human" | "json";
+  readonly mode: "fixture" | "live";
+  readonly format: "human" | "json";
 }
 
 export interface ShowcaseDeps {
-  readonly env?: NodeJS.ProcessEnv | undefined;
+  readonly env?: Record<string, string | undefined> | undefined;
   readonly fetchImpl?: typeof fetch | undefined;
-  readonly canonicalAggregate?: unknown;
-  readonly simulationAggregate?: unknown;
   readonly stdout?: ((s: string) => void) | undefined;
   readonly stderr?: ((s: string) => void) | undefined;
   readonly now?: (() => number) | undefined;
+  readonly canonicalAggregate?: unknown | undefined;
+  readonly simulationAggregate?: unknown | undefined;
 }
 
-export function parseCliArgs(rawArgs: string[] = process.argv.slice(2)): CliArguments {
-  let parsedValues: Record<string, string | boolean | (string | boolean)[] | undefined>;
-  try {
-    const { values } = parseArgs({
-      args: rawArgs,
-      options: {
-        mode: { type: "string", default: "fixture" },
-        format: { type: "string", default: "human" },
-      },
-      strict: true,
-    });
-    parsedValues = values;
-  } catch (error) {
-    throw new ConfigurationError(
-      `Invalid CLI arguments: ${error instanceof Error ? error.message : String(error)}. Allowed options: --mode=<fixture|live>, --format=<human|json>`,
-    );
+export function parseCliArgs(argv: string[]): CliArguments {
+  let mode: "fixture" | "live" = "fixture";
+  let format: "human" | "json" = "human";
+
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i] ?? "";
+    if (arg === "--mode=fixture") {
+      mode = "fixture";
+    } else if (arg === "--mode=live") {
+      mode = "live";
+    } else if (arg === "--mode") {
+      const next = argv[++i];
+      if (next === "fixture" || next === "live") {
+        mode = next;
+      } else {
+        throw new ConfigurationError(
+          `Invalid CLI options: Invalid enum value. Expected 'fixture' | 'live', received '${next ?? ""}'. Allowed values: --mode=<fixture|live>, --format=<human|json>`,
+        );
+      }
+    } else if (arg.startsWith("--mode=")) {
+      const val = arg.slice(7);
+      throw new ConfigurationError(
+        `Invalid CLI options: Invalid enum value. Expected 'fixture' | 'live', received '${val}'. Allowed values: --mode=<fixture|live>, --format=<human|json>`,
+      );
+    } else if (arg === "--format=human") {
+      format = "human";
+    } else if (arg === "--format=json") {
+      format = "json";
+    } else if (arg === "--format") {
+      const next = argv[++i];
+      if (next === "human" || next === "json") {
+        format = next;
+      } else {
+        throw new ConfigurationError(
+          `Invalid CLI options: Invalid enum value. Expected 'human' | 'json', received '${next ?? ""}'. Allowed values: --mode=<fixture|live>, --format=<human|json>`,
+        );
+      }
+    } else if (arg.startsWith("--format=")) {
+      const val = arg.slice(9);
+      throw new ConfigurationError(
+        `Invalid CLI options: Invalid enum value. Expected 'human' | 'json', received '${val}'. Allowed values: --mode=<fixture|live>, --format=<human|json>`,
+      );
+    } else {
+      throw new ConfigurationError(
+        `Invalid CLI options: Unrecognized argument '${arg}'. Allowed values: --mode=<fixture|live>, --format=<human|json>`,
+      );
+    }
   }
 
-  const result = cliOptionsSchema.safeParse({
-    mode: parsedValues["mode"],
-    format: parsedValues["format"],
-  });
-
-  if (!result.success) {
-    const issues = result.error.issues.map((i) => i.message).join("; ");
-    throw new ConfigurationError(
-      `Invalid CLI options: ${issues}. Allowed values: --mode=<fixture|live>, --format=<human|json>`,
-    );
-  }
-
-  return result.data;
+  return { mode, format };
 }
 
 export function mapErrorToExitCode(error: unknown): number {
+  if (error instanceof AggregateRuleError) return 1;
   if (error instanceof ConfigurationError) return 2;
-  if (error instanceof TransportError) return 3;
-  if (error instanceof HttpError) return 3;
+  if (error instanceof TransportError || error instanceof HttpError) return 3;
   if (error instanceof SchemaValidationError) return 4;
   if (error instanceof PaginationError) return 5;
   if (error instanceof QaChallengeError) return 1;
   return 6;
 }
 
-export function detectRequestedOutput(
-  rawArgs: readonly string[] = process.argv.slice(2),
-): { format: "human" | "json"; mode: "fixture" | "live" } {
+export function detectRequestedOutput(rawArgs: string[]): {
+  format: "human" | "json";
+  mode: "fixture" | "live";
+} {
   let format: "human" | "json" = "human";
   let mode: "fixture" | "live" = "fixture";
 
   for (let i = 0; i < rawArgs.length; i++) {
-    const arg = rawArgs[i];
-    if (!arg) continue;
-
-    if (arg === "--format") {
+    const arg = rawArgs[i] ?? "";
+    if (arg === "--format=json") {
+      format = "json";
+    } else if (arg === "--format=human") {
+      format = "human";
+    } else if (arg === "--format") {
       const next = rawArgs[i + 1];
       if (next === "json") {
         format = "json";
@@ -102,16 +134,11 @@ export function detectRequestedOutput(
         format = "human";
         i++;
       }
-    } else if (arg.startsWith("--format=")) {
-      const val = arg.slice("--format=".length);
-      if (val === "json") {
-        format = "json";
-      } else if (val === "human") {
-        format = "human";
-      }
-    }
-
-    if (arg === "--mode") {
+    } else if (arg === "--mode=live") {
+      mode = "live";
+    } else if (arg === "--mode=fixture") {
+      mode = "fixture";
+    } else if (arg === "--mode") {
       const next = rawArgs[i + 1];
       if (next === "live") {
         mode = "live";
@@ -119,13 +146,6 @@ export function detectRequestedOutput(
       } else if (next === "fixture") {
         mode = "fixture";
         i++;
-      }
-    } else if (arg.startsWith("--mode=")) {
-      const val = arg.slice("--mode=".length);
-      if (val === "live") {
-        mode = "live";
-      } else if (val === "fixture") {
-        mode = "fixture";
       }
     }
   }
@@ -162,12 +182,14 @@ export interface BuildErrorResultParams {
   readonly partial?: {
     readonly pagesFetched?: number | undefined;
     readonly recordsReceived?: number | undefined;
+    readonly uniqueRecords?: number | undefined;
     readonly duplicatesSkipped?: number | undefined;
     readonly draftRecords?: number | undefined;
     readonly openNonDraftRecords?: number | undefined;
     readonly paginationComplete?: boolean | undefined;
     readonly schemaValid?: boolean | null | undefined;
     readonly aggregateValid?: boolean | null | undefined;
+    readonly violations?: readonly AggregateViolation[] | undefined;
   } | undefined;
 }
 
@@ -182,13 +204,14 @@ export function buildErrorResult(params: BuildErrorResultParams): RunResult {
     fixtureName: params.mode === "fixture" ? "multi-page-deterministic-fixture" : undefined,
     pagesFetched: partial.pagesFetched ?? 0,
     recordsReceived: partial.recordsReceived ?? 0,
+    uniqueRecords: partial.uniqueRecords ?? 0,
     duplicatesSkipped: partial.duplicatesSkipped ?? 0,
     draftRecords: partial.draftRecords ?? 0,
     openNonDraftRecords: partial.openNonDraftRecords ?? 0,
     paginationComplete: partial.paginationComplete ?? false,
     schemaValid: partial.schemaValid ?? null,
     aggregateValid: partial.aggregateValid ?? null,
-    violations: [],
+    violations: partial.violations ?? [],
     durationMs: params.durationMs,
   });
 }
@@ -215,10 +238,14 @@ export async function runShowcase(
 
   let pagesFetched = 0;
   let recordsReceived = 0;
+  let uniqueRecords = 0;
   let duplicatesSkipped = 0;
   let draftRecords = 0;
   let openNonDraftRecords = 0;
   let paginationComplete = false;
+
+  let canonicalAggregateValid: boolean | null = null;
+  let canonicalViolations: readonly AggregateViolation[] = [];
 
   try {
     const envConfig = parseEnvironmentConfig(env);
@@ -251,11 +278,15 @@ export async function runShowcase(
       maxPages: envConfig.GITHUB_MAX_PAGES,
       onPageFetched: (event) => {
         pagesFetched = event.pageNumber;
-        recordsReceived = event.accumulatedCount;
+        recordsReceived = event.recordsReceived;
+        uniqueRecords = event.uniqueRecords;
+        duplicatesSkipped = event.duplicatesSkipped;
+        draftRecords = event.draftRecords;
+        openNonDraftRecords = event.openNonDraftRecords;
         if (!isJson) {
           log(
             `    • Page ${event.pageNumber}: fetched ${event.itemCount} PRs ` +
-            `(accumulated: ${event.accumulatedCount}, latency: ${event.durationMs}ms, ` +
+            `(accumulated: ${event.uniqueRecords}, latency: ${event.durationMs}ms, ` +
             `rate-limit remaining: ${event.rateLimitRemaining ?? "n/a"}) [✓ Valid Zod Schema]`,
           );
         }
@@ -265,16 +296,17 @@ export async function runShowcase(
     const part1Result = await client.fetchAllOpenPullRequests();
     pagesFetched = part1Result.pagesFetched;
     recordsReceived = part1Result.recordsReceived;
-
+    uniqueRecords = part1Result.uniqueRecords;
     duplicatesSkipped = part1Result.duplicatesSkipped;
-    draftRecords = part1Result.pullRequests.filter((pr) => pr.draft).length;
-    openNonDraftRecords = countOpenNonDraftPullRequests(part1Result.pullRequests);
+    draftRecords = part1Result.draftRecords;
+    openNonDraftRecords = part1Result.openNonDraftRecords;
     paginationComplete = part1Result.isComplete;
 
     if (!isJson) {
       log(formatter.section("PART 1 RESULTS"));
       log(formatter.metric("Pages Fetched", part1Result.pagesFetched));
       log(formatter.metric("Total Records Retrieved", part1Result.recordsReceived));
+      log(formatter.metric("Unique Records", part1Result.uniqueRecords));
       log(formatter.metric("Draft Records Excluded", draftRecords));
       log(formatter.metric("FINAL OPEN NON-DRAFT COUNT", openNonDraftRecords, "Official Challenge Metric"));
       log(formatter.metric("Pagination Completed", paginationComplete ? "YES (All pages followed)" : "NO"));
@@ -305,6 +337,8 @@ export async function runShowcase(
     }
     const canonicalValidated = canonicalParseResult.data;
     const canonicalRules = validateAggregateRules(canonicalValidated);
+    canonicalAggregateValid = canonicalRules.isValid;
+    canonicalViolations = canonicalRules.violations;
 
     const hasCountMismatch = canonicalRules.violations.some((v) => v.code === "PR_COUNT_MISMATCH");
     const hasHighPriorityDraft = canonicalRules.violations.some((v) => v.code === "HIGH_PRIORITY_PR_IS_DRAFT");
@@ -373,6 +407,7 @@ export async function runShowcase(
       fixtureName: args.mode === "fixture" ? "multi-page-deterministic-fixture" : undefined,
       pagesFetched: part1Result.pagesFetched,
       recordsReceived: part1Result.recordsReceived,
+      uniqueRecords: part1Result.uniqueRecords,
       duplicatesSkipped: part1Result.duplicatesSkipped,
       draftRecords,
       openNonDraftRecords,
@@ -409,6 +444,15 @@ export async function runShowcase(
     const errorDetails = describeError(error);
     const isSchemaError = error instanceof SchemaValidationError;
 
+    let finalSchemaValid: boolean | null;
+    if (isSchemaError) {
+      finalSchemaValid = false;
+    } else if (paginationComplete) {
+      finalSchemaValid = true;
+    } else {
+      finalSchemaValid = null;
+    }
+
     if (!isJson) {
       log(formatter.section("ERROR"));
       log(`  ${formatter.yellow(errorDetails.message)}`);
@@ -423,11 +467,14 @@ export async function runShowcase(
       partial: {
         pagesFetched,
         recordsReceived,
+        uniqueRecords,
         duplicatesSkipped,
         draftRecords,
         openNonDraftRecords,
         paginationComplete,
-        schemaValid: isSchemaError ? false : null,
+        schemaValid: finalSchemaValid,
+        aggregateValid: canonicalAggregateValid,
+        violations: canonicalViolations,
       },
     });
 

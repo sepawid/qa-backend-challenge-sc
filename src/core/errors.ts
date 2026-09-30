@@ -52,15 +52,15 @@ export class HttpError extends QaChallengeError {
 }
 
 export class SchemaValidationError extends QaChallengeError {
-  constructor(message: string, context: ErrorContext = {}) {
-    super("SCHEMA_VALIDATION_ERROR", message, context);
+  constructor(message: string, context: ErrorContext = {}, options?: ErrorOptions) {
+    super("SCHEMA_VALIDATION_ERROR", message, context, options);
     this.name = "SchemaValidationError";
   }
 }
 
 export class PaginationError extends QaChallengeError {
-  constructor(message: string, context: ErrorContext = {}) {
-    super("PAGINATION_ERROR", message, context);
+  constructor(message: string, context: ErrorContext = {}, options?: ErrorOptions) {
+    super("PAGINATION_ERROR", message, context, options);
     this.name = "PaginationError";
   }
 }

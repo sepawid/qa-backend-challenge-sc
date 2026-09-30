@@ -53,7 +53,7 @@ describe("Presentation: CLI exit codes and error mapping", () => {
 
     expect(exitCode).toBe(0);
     expect(result.status).toBe("passed");
-    expect(result.contractVersion).toBe("1.1");
+    expect(result.contractVersion).toBe("1.2");
     expect(result.collection.paginationComplete).toBe(true);
     expect(result.validation.schemaValid).toBe(true);
   });
@@ -203,7 +203,7 @@ describe("Presentation: CLI exit codes and error mapping", () => {
           status: 200,
           headers: {
             "content-type": "application/json",
-            link: '<https://api.github.com/repos/appwrite/appwrite/pulls?state=open&per_page=100&page=2>; rel="next"',
+            link: '<https://api.github.com/repos/appwrite/appwrite/pulls?state=open&per_page=100&sort=created&direction=asc&page=2>; rel="next"',
           },
         });
       }
@@ -212,7 +212,7 @@ describe("Presentation: CLI exit codes and error mapping", () => {
           status: 200,
           headers: {
             "content-type": "application/json",
-            link: '<https://api.github.com/repos/appwrite/appwrite/pulls?state=open&per_page=100&page=3>; rel="next"',
+            link: '<https://api.github.com/repos/appwrite/appwrite/pulls?state=open&per_page=100&sort=created&direction=asc&page=3>; rel="next"',
           },
         });
       }
@@ -253,7 +253,7 @@ describe("Presentation: CLI exit codes and error mapping", () => {
     expect(() => JSON.parse(combined)).not.toThrow();
     const parsed = JSON.parse(combined);
     expect(parsed.status).toBe("incomplete");
-    expect(parsed.contractVersion).toBe("1.1");
+    expect(parsed.contractVersion).toBe("1.2");
   });
 
   it("renders human output correctly in non-json mode", async () => {
@@ -348,7 +348,7 @@ describe("Presentation: CLI exit codes and error mapping", () => {
 
     expect(exitCode).toBe(0);
     expect(result.status).toBe("passed");
-    expect(result.contractVersion).toBe("1.1");
+    expect(result.contractVersion).toBe("1.2");
     expect(result.validation.simulation).toEqual({
       expectedViolation: "HIGH_PRIORITY_PR_IS_DRAFT",
       detected: true,
@@ -426,7 +426,7 @@ describe("Presentation: CLI exit codes and error mapping", () => {
           status: 200,
           headers: {
             "content-type": "application/json",
-            link: '<https://api.github.com/repos/appwrite/appwrite/pulls?state=open&per_page=100&page=2>; rel="next"',
+            link: '<https://api.github.com/repos/appwrite/appwrite/pulls?state=open&per_page=100&sort=created&direction=asc&page=2>; rel="next"',
           },
         });
       }
@@ -537,7 +537,7 @@ describe("Presentation: buildErrorResult", () => {
       durationMs: 10,
     });
 
-    expect(result.contractVersion).toBe("1.1");
+    expect(result.contractVersion).toBe("1.2");
     expect(result.mode).toBe("fixture");
     expect(result.status).toBe("incomplete");
     expect(result.error).toEqual(errorDetails);
@@ -562,6 +562,7 @@ describe("Presentation: buildErrorResult", () => {
       partial: {
         pagesFetched: 2,
         recordsReceived: 200,
+        uniqueRecords: 199,
         duplicatesSkipped: 1,
         draftRecords: 10,
         openNonDraftRecords: 190,
@@ -574,12 +575,36 @@ describe("Presentation: buildErrorResult", () => {
     expect(result.source.fixtureName).toBeUndefined();
     expect(result.collection.pagesFetched).toBe(2);
     expect(result.collection.recordsReceived).toBe(200);
+    expect(result.collection.uniqueRecords).toBe(199);
     expect(result.collection.duplicatesSkipped).toBe(1);
     expect(result.collection.draftRecords).toBe(10);
     expect(result.collection.openNonDraftRecords).toBe(190);
     expect(result.collection.paginationComplete).toBe(false);
     expect(result.validation.schemaValid).toBe(true);
     expect(result.validation.aggregateValid).toBeNull();
+  });
+
+  it("preserves canonical validation state (aggregateValid: true) when simulation aggregate fails schema validation", async () => {
+    const stdoutWrites: string[] = [];
+    const stderrWrites: string[] = [];
+    const { exitCode, result } = await runShowcase(
+      { mode: "fixture", format: "json" },
+      {
+        stdout: (s) => stdoutWrites.push(s),
+        stderr: (s) => stderrWrites.push(s),
+        simulationAggregate: { invalid: "payload", missing: "everything" },
+      },
+    );
+
+    expect(exitCode).toBe(4);
+    expect(result.status).toBe("incomplete");
+    expect(result.error?.code).toBe("SCHEMA_VALIDATION_ERROR");
+    expect(result.error?.message).toContain("Part 2 simulation aggregate schema validation failed");
+    // Canonical validation ran and passed before simulation step
+    expect(result.validation.aggregateValid).toBe(true);
+    expect(result.validation.violations).toEqual([]);
+    // Simulation failed schema validation, so schemaValid is false
+    expect(result.validation.schemaValid).toBe(false);
   });
 });
 

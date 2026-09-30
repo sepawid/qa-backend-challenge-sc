@@ -13,6 +13,8 @@ import {
 } from "../../src/demo/fixtures/github-pulls-pages.js";
 import { createFixtureFetch } from "../../src/demo/fixture-fetch.js";
 
+const VALID_QUERY = "state=open&per_page=100&sort=created&direction=asc";
+
 describe("Integration: Deterministic multi-page pagination & defensive controls", () => {
   it("fetches all 3 pages sequentially, validates schemas, and calculates exact open non-draft total", async () => {
     const requestedUrls: string[] = [];
@@ -32,6 +34,8 @@ describe("Integration: Deterministic multi-page pagination & defensive controls"
     expect(requestedUrls).toHaveLength(3);
     expect(result.pagesFetched).toBe(3);
     expect(result.recordsReceived).toBe(6);
+    expect(result.uniqueRecords).toBe(6);
+    expect(result.duplicatesSkipped).toBe(0);
     expect(result.isComplete).toBe(true);
 
     // Business count verification
@@ -55,7 +59,7 @@ describe("Integration: Deterministic multi-page pagination & defensive controls"
         status: 200,
         headers: {
           "content-type": "application/json",
-          link: '<https://api.github.com/repos/appwrite/appwrite/pulls?state=open&per_page=100&page=2>; rel="next"',
+          link: `<https://api.github.com/repos/appwrite/appwrite/pulls?${VALID_QUERY}&page=2>; rel="next"`,
         },
       });
     });
@@ -67,6 +71,7 @@ describe("Integration: Deterministic multi-page pagination & defensive controls"
     const result = await client.fetchAllOpenPullRequests();
     expect(result.pagesFetched).toBe(2);
     expect(result.recordsReceived).toBe(2);
+    expect(result.uniqueRecords).toBe(2);
     expect(result.isComplete).toBe(true);
   });
 
@@ -76,8 +81,8 @@ describe("Integration: Deterministic multi-page pagination & defensive controls"
       const isPage2 = parsed.searchParams.get("page") === "2";
       // Loop points page 2 back to page 1
       const nextTarget = isPage2
-        ? "https://api.github.com/repos/appwrite/appwrite/pulls?state=open&per_page=100"
-        : "https://api.github.com/repos/appwrite/appwrite/pulls?state=open&per_page=100&page=2";
+        ? `https://api.github.com/repos/appwrite/appwrite/pulls?${VALID_QUERY}`
+        : `https://api.github.com/repos/appwrite/appwrite/pulls?${VALID_QUERY}&page=2`;
 
       // Return unique IDs on page 2 so cycle detection fires rather than duplicate ID
       const items = isPage2 ? page2Fixture : page1Fixture;
@@ -106,7 +111,7 @@ describe("Integration: Deterministic multi-page pagination & defensive controls"
         status: 200,
         headers: {
           "content-type": "application/json",
-          link: '<https://attacker.example.com/steal-token>; rel="next"',
+          link: `<https://attacker.example.com/steal-token?${VALID_QUERY}&page=2>; rel="next"`,
         },
       });
     });
@@ -126,7 +131,7 @@ describe("Integration: Deterministic multi-page pagination & defensive controls"
         status: 200,
         headers: {
           "content-type": "application/json",
-          link: '<http://api.github.com/repos/appwrite/appwrite/pulls?state=open&per_page=100&page=2>; rel="next"',
+          link: `<http://api.github.com/repos/appwrite/appwrite/pulls?${VALID_QUERY}&page=2>; rel="next"`,
         },
       });
     });
@@ -140,7 +145,7 @@ describe("Integration: Deterministic multi-page pagination & defensive controls"
     );
   });
 
-  it("deduplicates records if duplicate PR IDs appear across different pages", async () => {
+  it("deduplicates records if duplicate PR IDs appear across different pages with accurate counter invariants", async () => {
     const mockFetch = vi.fn().mockImplementation(async (url: string) => {
       const parsed = new URL(url);
       const isPage2 = parsed.searchParams.get("page") === "2";
@@ -152,7 +157,7 @@ describe("Integration: Deterministic multi-page pagination & defensive controls"
           ...(isPage2
             ? {}
             : {
-                link: '<https://api.github.com/repos/appwrite/appwrite/pulls?state=open&per_page=100&page=2>; rel="next"',
+                link: `<https://api.github.com/repos/appwrite/appwrite/pulls?${VALID_QUERY}&page=2>; rel="next"`,
               }),
         },
       });
@@ -164,8 +169,10 @@ describe("Integration: Deterministic multi-page pagination & defensive controls"
 
     const result = await client.fetchAllOpenPullRequests();
     expect(result.pagesFetched).toBe(2);
-    expect(result.duplicatesSkipped).toBe(2);
-    expect(result.recordsReceived).toBe(2);
+    expect(result.recordsReceived).toBe(4); // 2 records on page 1 + 2 records on page 2
+    expect(result.uniqueRecords).toBe(2);   // 2 unique records
+    expect(result.duplicatesSkipped).toBe(2); // 2 duplicates skipped
+    expect(result.recordsReceived).toBe(result.uniqueRecords + result.duplicatesSkipped);
     expect(result.pullRequests).toHaveLength(2);
   });
 
@@ -186,23 +193,14 @@ describe("Integration: Deterministic multi-page pagination & defensive controls"
     await expect(client.fetchAllOpenPullRequests()).rejects.toThrow(/within page 1/i);
   });
 
-  it("fails with PaginationError if repository ID in next link changes", async () => {
-    const mockFetch = vi.fn().mockImplementation(async (url: string) => {
-      const parsed = new URL(url);
-      if (parsed.pathname === "/repos/appwrite/appwrite/pulls") {
-        return new Response(JSON.stringify(page1Fixture), {
-          status: 200,
-          headers: {
-            "content-type": "application/json",
-            link: '<https://api.github.com/repositories/123/pulls?page=2>; rel="next"',
-          },
-        });
-      }
-      return new Response(JSON.stringify(page2Fixture), {
+  it("fails with PaginationError if first numeric repository ID does not match confirmed base repository", async () => {
+    const mockFetch = vi.fn().mockImplementation(async () => {
+      return new Response(JSON.stringify(page1Fixture), {
         status: 200,
         headers: {
           "content-type": "application/json",
-          link: '<https://api.github.com/repositories/999/pulls?page=3>; rel="next"',
+          // Repos ID 999 does not match 180190854 from page1Fixture
+          link: `<https://api.github.com/repositories/999/pulls?${VALID_QUERY}&page=2>; rel="next"`,
         },
       });
     });
@@ -213,6 +211,95 @@ describe("Integration: Deterministic multi-page pagination & defensive controls"
 
     await expect(client.fetchAllOpenPullRequests()).rejects.toThrow(PaginationError);
     await expect(client.fetchAllOpenPullRequests()).rejects.toThrow(/mismatched repository ID/i);
+  });
+
+  it("fails with PaginationError if repository ID in next link changes later in pagination", async () => {
+    const mockFetch = vi.fn().mockImplementation(async (url: string) => {
+      const parsed = new URL(url);
+      if (parsed.pathname === "/repos/appwrite/appwrite/pulls") {
+        return new Response(JSON.stringify(page1Fixture), {
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+            // 180190854 matches confirmed base repo
+            link: `<https://api.github.com/repositories/180190854/pulls?${VALID_QUERY}&page=2>; rel="next"`,
+          },
+        });
+      }
+      return new Response(JSON.stringify(page2Fixture), {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          // Page 2 switches to 999
+          link: `<https://api.github.com/repositories/999/pulls?${VALID_QUERY}&page=3>; rel="next"`,
+        },
+      });
+    });
+
+    const client = new GitHubPullRequestClient({
+      fetchImpl: mockFetch as unknown as typeof fetch,
+    });
+
+    await expect(client.fetchAllOpenPullRequests()).rejects.toThrow(PaginationError);
+    await expect(client.fetchAllOpenPullRequests()).rejects.toThrow(/mismatched repository ID/i);
+  });
+
+  it("refuses next link that alters query parameter semantics (e.g. missing sort/direction)", async () => {
+    const mockFetch = vi.fn().mockImplementation(async () => {
+      return new Response(JSON.stringify(page1Fixture), {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          // Next link omits sort and direction, changing server ordering
+          link: '<https://api.github.com/repos/appwrite/appwrite/pulls?state=open&per_page=100&page=2>; rel="next"',
+        },
+      });
+    });
+
+    const client = new GitHubPullRequestClient({
+      fetchImpl: mockFetch as unknown as typeof fetch,
+    });
+
+    await expect(client.fetchAllOpenPullRequests()).rejects.toThrow(PaginationError);
+    await expect(client.fetchAllOpenPullRequests()).rejects.toThrow(/invalid or missing "sort" parameter/i);
+  });
+
+  it("refuses next link that alters per_page or state", async () => {
+    const mockFetch = vi.fn().mockImplementation(async () => {
+      return new Response(JSON.stringify(page1Fixture), {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          link: '<https://api.github.com/repos/appwrite/appwrite/pulls?state=all&per_page=50&sort=created&direction=asc&page=2>; rel="next"',
+        },
+      });
+    });
+
+    const client = new GitHubPullRequestClient({
+      fetchImpl: mockFetch as unknown as typeof fetch,
+    });
+
+    await expect(client.fetchAllOpenPullRequests()).rejects.toThrow(PaginationError);
+    await expect(client.fetchAllOpenPullRequests()).rejects.toThrow(/invalid or missing "state" parameter/i);
+  });
+
+  it("refuses next link with duplicate contradictory query parameters", async () => {
+    const mockFetch = vi.fn().mockImplementation(async () => {
+      return new Response(JSON.stringify(page1Fixture), {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          link: '<https://api.github.com/repos/appwrite/appwrite/pulls?state=open&per_page=100&sort=created&sort=updated&direction=asc&page=2>; rel="next"',
+        },
+      });
+    });
+
+    const client = new GitHubPullRequestClient({
+      fetchImpl: mockFetch as unknown as typeof fetch,
+    });
+
+    await expect(client.fetchAllOpenPullRequests()).rejects.toThrow(PaginationError);
+    await expect(client.fetchAllOpenPullRequests()).rejects.toThrow(/duplicate "sort" query parameter/i);
   });
 
   it("constructs initial URL with sort=created and direction=asc", async () => {
@@ -249,6 +336,7 @@ describe("Integration: Deterministic multi-page pagination & defensive controls"
           html_url: `https://github.com/appwrite/appwrite/pull/${callCount}`,
           created_at: "2024-01-01T00:00:00Z",
           labels: [],
+          base: { repo: { id: 180190854, full_name: "appwrite/appwrite" } },
         },
       ];
 
@@ -256,7 +344,7 @@ describe("Integration: Deterministic multi-page pagination & defensive controls"
         status: 200,
         headers: {
           "content-type": "application/json",
-          link: `<https://api.github.com/repos/appwrite/appwrite/pulls?state=open&per_page=100&page=${callCount + 1}>; rel="next"`,
+          link: `<https://api.github.com/repos/appwrite/appwrite/pulls?${VALID_QUERY}&page=${callCount + 1}>; rel="next"`,
         },
       });
     });
@@ -308,7 +396,7 @@ describe("Integration: Deterministic multi-page pagination & defensive controls"
         status: 200,
         headers: {
           "content-type": "application/json",
-          link: '<https://api.github.com/user/emails?page=2>; rel="next"',
+          link: `<https://api.github.com/user/emails?${VALID_QUERY}&page=2>; rel="next"`,
         },
       });
     });
@@ -328,7 +416,7 @@ describe("Integration: Deterministic multi-page pagination & defensive controls"
         status: 200,
         headers: {
           "content-type": "application/json",
-          link: '<https://api.github.com/repos/appwrite/appwrite/pulls?state=open&per_page=100&page=2#malicious>; rel="next"',
+          link: `<https://api.github.com/repos/appwrite/appwrite/pulls?${VALID_QUERY}&page=2#malicious>; rel="next"`,
         },
       });
     });
@@ -349,8 +437,8 @@ describe("Integration: Deterministic multi-page pagination & defensive controls"
         headers: {
           "content-type": "application/json",
           link: [
-            '<https://api.github.com/repos/appwrite/appwrite/pulls?state=open&per_page=100&page=2>; rel="next"',
-            '<https://api.github.com/repos/appwrite/appwrite/pulls?state=open&per_page=100&page=3>; rel="next"',
+            `<https://api.github.com/repos/appwrite/appwrite/pulls?${VALID_QUERY}&page=2>; rel="next"`,
+            `<https://api.github.com/repos/appwrite/appwrite/pulls?${VALID_QUERY}&page=3>; rel="next"`,
           ].join(", "),
         },
       });
@@ -363,4 +451,3 @@ describe("Integration: Deterministic multi-page pagination & defensive controls"
     await expect(client.fetchAllOpenPullRequests()).rejects.toThrow(PaginationError);
   });
 });
-

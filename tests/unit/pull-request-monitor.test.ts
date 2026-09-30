@@ -66,4 +66,21 @@ describe("Business Logic: pull-request-monitor", () => {
     expect(filtered).toHaveLength(1);
     expect(input).toHaveLength(2);
   });
+
+  it("accurately evaluates the 30-record historical challenge dataset (4 drafts, 26 open non-drafts)", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const filePath = path.resolve(__dirname, "../../../qa-backend-challenge/api_github_com_repos_appwrite_appwrite_pulls.json");
+
+    if (fs.existsSync(filePath)) {
+      const raw = fs.readFileSync(filePath, "utf-8");
+      const data = JSON.parse(raw) as GitHubPullRequest[];
+      expect(data).toHaveLength(30);
+      const drafts = data.filter((pr) => pr.draft);
+      expect(drafts).toHaveLength(4);
+      const openNonDrafts = filterOpenNonDraftPullRequests(data);
+      expect(openNonDrafts).toHaveLength(26);
+      expect(countOpenNonDraftPullRequests(data)).toBe(26);
+    }
+  });
 });

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildRunResult, KNOWN_LIMITATIONS } from "../../src/presentation/presentation-model.js";
 
 describe("Presentation: presentation-model", () => {
-  it("constructs a valid RunResult adhering to contractVersion 1.1", () => {
+  it("constructs a valid RunResult adhering to contractVersion 1.2", () => {
     const result = buildRunResult({
       mode: "fixture",
       status: "passed",
@@ -11,6 +11,7 @@ describe("Presentation: presentation-model", () => {
       fixtureName: "test-fixture",
       pagesFetched: 3,
       recordsReceived: 6,
+      uniqueRecords: 6,
       draftRecords: 2,
       openNonDraftRecords: 4,
       paginationComplete: true,
@@ -23,7 +24,7 @@ describe("Presentation: presentation-model", () => {
       durationMs: 100,
     });
 
-    expect(result.contractVersion).toBe("1.1");
+    expect(result.contractVersion).toBe("1.2");
     expect(result.mode).toBe("fixture");
     expect(result.status).toBe("passed");
     expect(result.source.provider).toBe("github");
@@ -31,6 +32,7 @@ describe("Presentation: presentation-model", () => {
     expect(result.source.fixtureName).toBe("test-fixture");
     expect(result.collection.pagesFetched).toBe(3);
     expect(result.collection.recordsReceived).toBe(6);
+    expect(result.collection.uniqueRecords).toBe(6);
     expect(result.collection.draftRecords).toBe(2);
     expect(result.collection.openNonDraftRecords).toBe(4);
     expect(result.collection.paginationComplete).toBe(true);
@@ -48,6 +50,7 @@ describe("Presentation: presentation-model", () => {
       observedTo: "2024-01-01T00:00:01Z",
       pagesFetched: 0,
       recordsReceived: 0,
+      uniqueRecords: 0,
       draftRecords: 0,
       openNonDraftRecords: 0,
       paginationComplete: false,
