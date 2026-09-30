@@ -93,16 +93,40 @@ export function detectRequestedOutput(
     const arg = rawArgs[i];
     if (!arg) continue;
 
-    if (arg === "--format=json") {
-      format = "json";
-    } else if (arg === "--format=human") {
-      format = "human";
+    if (arg === "--format") {
+      const next = rawArgs[i + 1];
+      if (next === "json") {
+        format = "json";
+        i++;
+      } else if (next === "human") {
+        format = "human";
+        i++;
+      }
+    } else if (arg.startsWith("--format=")) {
+      const val = arg.slice("--format=".length);
+      if (val === "json") {
+        format = "json";
+      } else if (val === "human") {
+        format = "human";
+      }
     }
 
-    if (arg === "--mode=live") {
-      mode = "live";
-    } else if (arg === "--mode=fixture") {
-      mode = "fixture";
+    if (arg === "--mode") {
+      const next = rawArgs[i + 1];
+      if (next === "live") {
+        mode = "live";
+        i++;
+      } else if (next === "fixture") {
+        mode = "fixture";
+        i++;
+      }
+    } else if (arg.startsWith("--mode=")) {
+      const val = arg.slice("--mode=".length);
+      if (val === "live") {
+        mode = "live";
+      } else if (val === "fixture") {
+        mode = "fixture";
+      }
     }
   }
 
