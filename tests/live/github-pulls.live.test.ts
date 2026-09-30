@@ -42,10 +42,7 @@ async function fetchSearchTotalCount(query: string, token?: string): Promise<Sea
 describe("Live Integration: Appwrite repository open pull requests", () => {
   it("exhaustively navigates all live pages via rel=next, validates contracts, and calculates accurate open non-draft total", async () => {
     const config = parseEnvironmentConfig();
-    const rawTolerance = process.env["LIVE_TOLERANCE"];
-    const parsedTolerance = rawTolerance !== undefined ? Number(rawTolerance) : 3;
-    const liveTolerance =
-      Number.isSafeInteger(parsedTolerance) && parsedTolerance >= 0 ? parsedTolerance : 3;
+    const liveTolerance = config.LIVE_TOLERANCE;
 
     const client = new GitHubPullRequestClient({
       token: config.GITHUB_TOKEN,

@@ -145,7 +145,7 @@ npm run test:live
 ### Consistency Limitations in Live Data:
 - The GitHub REST API does not provide atomic multi-page repository snapshots.
 - Using `sort=created&direction=asc` alongside cross-page deduplication protects against record inflation. However, if a PR is closed while pagination is in progress, offset shifting can theoretically skip a record (an inherent limitation of offset-based pagination).
-- To verify the integrity of the live count, `tests/live/github-pulls.live.test.ts` queries the independent GitHub Search API (`repo:appwrite/appwrite is:pr is:open draft:false`) and validates that the delta between the paginated count and search oracle is within `LIVE_TOLERANCE` (default: 3).
+- To verify the integrity of the live count, `tests/live/github-pulls.live.test.ts` queries the independent GitHub Search API (`repo:appwrite/appwrite is:pr is:open draft:false`) and validates that the delta between the paginated count and search oracle is within `LIVE_TOLERANCE` (default: 3; validated via `environmentConfigSchema` as an integer between 0 and 1000; invalid values fail loud with `ConfigurationError`).
 
 ### Part 2 Business Rule Assumptions:
 - **Exact Label Matching**: The specification mandates checking for the `"high-priority"` label. Matching is exact (case-sensitive, untrimmed). A label with different casing (e.g. `"High-Priority"`) or padding whitespace (e.g. `" high-priority "`) does not trigger Rule 2. If business requirements demand case-insensitivity or whitespace trimming, it can be extended via normalization without architectural changes.
@@ -236,7 +236,7 @@ In failure scenarios, structured error details conforming to the same `RunResult
 |---:|---|---|
 | `0` | Success | All tasks succeeded: Part 1 completed pagination, Part 2 canonical aggregate passed, and simulation caught expected violation. |
 | `1` | Business Rule Violation / QA Failure | Canonical aggregate rule violation (`PR_COUNT_MISMATCH` or `HIGH_PRIORITY_PR_IS_DRAFT`), or failure to detect simulation violation. |
-| `2` | Configuration Error | Invalid environment variable values (`GITHUB_TOKEN`, `GITHUB_TIMEOUT_MS`, `GITHUB_MAX_PAGES`) or invalid CLI options. |
+| `2` | Configuration Error | Invalid environment variable values (`GITHUB_TOKEN`, `GITHUB_TIMEOUT_MS`, `GITHUB_MAX_PAGES`, `LIVE_TOLERANCE`) or invalid CLI options. |
 | `3` | Transport / HTTP Error | Network socket failure, request timeout, HTTP 4xx/5xx responses, or unauthenticated rate limit exhaustion. |
 | `4` | Schema Validation Error | Wire-schema validation failed (Zod parsing error on GitHub PR page or aggregate response). |
 | `5` | Pagination Anomaly | RFC 8288 ambiguous `rel="next"` links, pagination loop detected, repository mismatch, or intra-page duplicate IDs. |

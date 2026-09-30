@@ -37,6 +37,21 @@ export const environmentConfigSchema = z.object({
       }
       return num;
     }),
+  LIVE_TOLERANCE: z
+    .string()
+    .optional()
+    .transform((val, ctx) => {
+      if (!val) return 3;
+      const num = Number(val);
+      if (!Number.isSafeInteger(num) || num < 0 || num > 1000) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "LIVE_TOLERANCE must be an integer between 0 and 1000",
+        });
+        return z.NEVER;
+      }
+      return num;
+    }),
 });
 
 export const cliOptionsSchema = z.object({
@@ -52,6 +67,7 @@ export function parseEnvironmentConfig(env: NodeJS.ProcessEnv = process.env): En
     GITHUB_TOKEN: env["GITHUB_TOKEN"] || undefined,
     GITHUB_TIMEOUT_MS: env["GITHUB_TIMEOUT_MS"] || undefined,
     GITHUB_MAX_PAGES: env["GITHUB_MAX_PAGES"] || undefined,
+    LIVE_TOLERANCE: env["LIVE_TOLERANCE"] || undefined,
   });
 
   if (!result.success) {

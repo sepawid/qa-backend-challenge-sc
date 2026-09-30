@@ -8,6 +8,7 @@ describe("Schemas: config.schema", () => {
     expect(config.GITHUB_TOKEN).toBeUndefined();
     expect(config.GITHUB_TIMEOUT_MS).toBe(10_000);
     expect(config.GITHUB_MAX_PAGES).toBe(20);
+    expect(config.LIVE_TOLERANCE).toBe(3);
   });
 
   it("parses valid custom environment variables", () => {
@@ -15,10 +16,12 @@ describe("Schemas: config.schema", () => {
       GITHUB_TOKEN: "ghp_custom_token",
       GITHUB_TIMEOUT_MS: "15000",
       GITHUB_MAX_PAGES: "50",
+      LIVE_TOLERANCE: "5",
     });
     expect(config.GITHUB_TOKEN).toBe("ghp_custom_token");
     expect(config.GITHUB_TIMEOUT_MS).toBe(15_000);
     expect(config.GITHUB_MAX_PAGES).toBe(50);
+    expect(config.LIVE_TOLERANCE).toBe(5);
   });
 
   it("throws on invalid timeout values", () => {
@@ -35,6 +38,18 @@ describe("Schemas: config.schema", () => {
       ConfigurationError,
     );
     expect(() => parseEnvironmentConfig({ GITHUB_MAX_PAGES: "9999" })).toThrow(
+      ConfigurationError,
+    );
+  });
+
+  it("throws on invalid live tolerance values", () => {
+    expect(() => parseEnvironmentConfig({ LIVE_TOLERANCE: "abc" })).toThrow(
+      ConfigurationError,
+    );
+    expect(() => parseEnvironmentConfig({ LIVE_TOLERANCE: "-1" })).toThrow(
+      ConfigurationError,
+    );
+    expect(() => parseEnvironmentConfig({ LIVE_TOLERANCE: "1001" })).toThrow(
       ConfigurationError,
     );
   });
