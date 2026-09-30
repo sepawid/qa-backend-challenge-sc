@@ -65,8 +65,12 @@ export {
   parseCliArgs,
   runShowcase,
   mapErrorToExitCode,
+  detectRequestedOutput,
+  describeError,
+  buildErrorResult,
   type CliArguments,
   type ShowcaseDeps,
+  type BuildErrorResultParams,
 } from "./presentation/cli.js";
 
 export {

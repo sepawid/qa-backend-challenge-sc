@@ -83,6 +83,92 @@ export function mapErrorToExitCode(error: unknown): number {
   return 6;
 }
 
+export function detectRequestedOutput(
+  rawArgs: readonly string[] = process.argv.slice(2),
+): { format: "human" | "json"; mode: "fixture" | "live" } {
+  let format: "human" | "json" = "human";
+  let mode: "fixture" | "live" = "fixture";
+
+  for (let i = 0; i < rawArgs.length; i++) {
+    const arg = rawArgs[i];
+    if (!arg) continue;
+
+    if (arg === "--format=json") {
+      format = "json";
+    } else if (arg === "--format=human") {
+      format = "human";
+    }
+
+    if (arg === "--mode=live") {
+      mode = "live";
+    } else if (arg === "--mode=fixture") {
+      mode = "fixture";
+    }
+  }
+
+  return { format, mode };
+}
+
+export function describeError(error: unknown): RunErrorDetails {
+  let code = "UNKNOWN_ERROR";
+  let page: number | undefined;
+
+  if (error instanceof QaChallengeError) {
+    code = error.code;
+    page = error.context.page;
+  } else if (error instanceof Error) {
+    code = error.name;
+  }
+
+  const message = error instanceof Error ? error.message : String(error);
+
+  return {
+    code,
+    message,
+    ...(page !== undefined ? { page } : {}),
+  };
+}
+
+export interface BuildErrorResultParams {
+  readonly mode: "fixture" | "live";
+  readonly error: RunErrorDetails;
+  readonly observedFrom: string;
+  readonly observedTo: string;
+  readonly durationMs: number;
+  readonly partial?: {
+    readonly pagesFetched?: number | undefined;
+    readonly recordsReceived?: number | undefined;
+    readonly duplicatesSkipped?: number | undefined;
+    readonly draftRecords?: number | undefined;
+    readonly openNonDraftRecords?: number | undefined;
+    readonly paginationComplete?: boolean | undefined;
+    readonly schemaValid?: boolean | null | undefined;
+    readonly aggregateValid?: boolean | null | undefined;
+  } | undefined;
+}
+
+export function buildErrorResult(params: BuildErrorResultParams): RunResult {
+  const partial = params.partial ?? {};
+  return buildRunResult({
+    mode: params.mode,
+    status: "incomplete",
+    error: params.error,
+    observedFrom: params.observedFrom,
+    observedTo: params.observedTo,
+    fixtureName: params.mode === "fixture" ? "multi-page-deterministic-fixture" : undefined,
+    pagesFetched: partial.pagesFetched ?? 0,
+    recordsReceived: partial.recordsReceived ?? 0,
+    duplicatesSkipped: partial.duplicatesSkipped ?? 0,
+    draftRecords: partial.draftRecords ?? 0,
+    openNonDraftRecords: partial.openNonDraftRecords ?? 0,
+    paginationComplete: partial.paginationComplete ?? false,
+    schemaValid: partial.schemaValid ?? null,
+    aggregateValid: partial.aggregateValid ?? false,
+    violations: [],
+    durationMs: params.durationMs,
+  });
+}
+
 export async function runShowcase(
   args: CliArguments,
   deps: ShowcaseDeps = {},
@@ -296,48 +382,29 @@ export async function runShowcase(
     const durationMs = now() - startTime;
     const observedTo = new Date(now()).toISOString();
     const exitCode = mapErrorToExitCode(error);
-    const errorMessage = error instanceof Error ? error.message : String(error);
-
-    let errorCode = "UNKNOWN_ERROR";
-    let errorPage: number | undefined;
-
-    if (error instanceof QaChallengeError) {
-      errorCode = error.code;
-      errorPage = error.context.page;
-    } else if (error instanceof Error) {
-      errorCode = error.name;
-    }
-
+    const errorDetails = describeError(error);
     const isSchemaError = error instanceof SchemaValidationError;
-
-    const errorDetails: RunErrorDetails = {
-      code: errorCode,
-      message: errorMessage,
-      ...(errorPage !== undefined ? { page: errorPage } : {}),
-    };
 
     if (!isJson) {
       log(formatter.section("ERROR"));
-      log(`  ${formatter.yellow(errorMessage)}`);
+      log(`  ${formatter.yellow(errorDetails.message)}`);
     }
 
-    const incompleteResult = buildRunResult({
+    const incompleteResult = buildErrorResult({
       mode: args.mode,
-      status: "incomplete",
       error: errorDetails,
       observedFrom,
       observedTo,
-      fixtureName: args.mode === "fixture" ? "multi-page-deterministic-fixture" : undefined,
-      pagesFetched,
-      recordsReceived,
-      duplicatesSkipped,
-      draftRecords,
-      openNonDraftRecords,
-      paginationComplete,
-      schemaValid: isSchemaError ? false : null,
-      aggregateValid: false,
-      violations: [],
       durationMs,
+      partial: {
+        pagesFetched,
+        recordsReceived,
+        duplicatesSkipped,
+        draftRecords,
+        openNonDraftRecords,
+        paginationComplete,
+        schemaValid: isSchemaError ? false : null,
+      },
     });
 
     if (isJson) {

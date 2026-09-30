@@ -1,6 +1,11 @@
-import { parseCliArgs, runShowcase, mapErrorToExitCode } from "./cli.js";
-import { buildRunResult } from "./presentation-model.js";
-import { QaChallengeError, ConfigurationError } from "../core/errors.js";
+import {
+  parseCliArgs,
+  runShowcase,
+  mapErrorToExitCode,
+  detectRequestedOutput,
+  describeError,
+  buildErrorResult,
+} from "./cli.js";
 
 async function main(): Promise<void> {
   let format: "human" | "json" = "human";
@@ -11,46 +16,17 @@ async function main(): Promise<void> {
     process.exit(exitCode);
   } catch (error) {
     const exitCode = mapErrorToExitCode(error);
-    const rawArgs = process.argv.slice(2);
-    const wantsJson =
-      format === "json" ||
-      rawArgs.includes("--format=json") ||
-      rawArgs.some((arg) => arg.startsWith("--format=json"));
+    const requested = detectRequestedOutput(process.argv.slice(2));
+    const wantsJson = format === "json" || requested.format === "json";
 
     if (wantsJson) {
-      const modeArg = rawArgs.find((arg) => arg.startsWith("--mode="));
-      const modeValue = modeArg ? modeArg.slice("--mode=".length) : undefined;
-      const mode: "fixture" | "live" = modeValue === "live" ? "live" : "fixture";
       const nowIso = new Date().toISOString();
-
-      let errorCode = "UNEXPECTED_ERROR";
-      if (error instanceof ConfigurationError) {
-        errorCode = "CONFIGURATION_ERROR";
-      } else if (error instanceof QaChallengeError) {
-        errorCode = error.code;
-      } else if (error instanceof Error) {
-        errorCode = error.name;
-      }
-
-      const fallbackResult = buildRunResult({
-        mode,
-        status: "incomplete",
-        error: {
-          code: errorCode,
-          message: error instanceof Error ? error.message : String(error),
-        },
+      const errorDetails = describeError(error);
+      const fallbackResult = buildErrorResult({
+        mode: requested.mode,
+        error: errorDetails,
         observedFrom: nowIso,
         observedTo: nowIso,
-        fixtureName: mode === "fixture" ? "multi-page-deterministic-fixture" : undefined,
-        pagesFetched: 0,
-        recordsReceived: 0,
-        duplicatesSkipped: 0,
-        draftRecords: 0,
-        openNonDraftRecords: 0,
-        paginationComplete: false,
-        schemaValid: null,
-        aggregateValid: false,
-        violations: [],
         durationMs: 0,
       });
 
